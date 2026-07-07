@@ -1,0 +1,867 @@
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{min-height:100vh;background:linear-gradient(135deg,#a8ddd4 0%,#c4ece4 50%,#b8e4da 100%);}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;-webkit-font-smoothing:antialiased;}
+
+#root{display:flex;flex-direction:column;align-items:center;padding:30px 20px 60px;gap:0;}
+.page-title{font-size:15px;font-weight:700;color:rgba(255,255,255,0.9);margin-bottom:24px;letter-spacing:1px;text-shadow:0 1px 4px rgba(0,0,0,0.15);}
+.devices-row{display:flex;gap:40px;align-items:flex-start;justify-content:center;flex-wrap:wrap;}
+.device-col{display:flex;flex-direction:column;align-items:center;gap:12px;}
+.device-label{font-size:12px;font-weight:700;color:rgba(255,255,255,0.8);letter-spacing:0.5px;}
+
+/* ── iOSフレーム ── */
+.frame-ios{
+  width:375px;height:812px;
+  position:relative;overflow:hidden;
+  border-radius:50px;background:#f0faf8;
+  box-shadow:0 0 0 2px #b0b0b0,0 0 0 10px #1c1c1e,0 0 0 12px #3a3a3c,0 40px 100px rgba(0,0,0,0.4);
+  display:flex;flex-direction:column;
+}
+.ios-island{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:120px;height:34px;background:#1c1c1e;border-radius:20px;z-index:200;}
+.ios-statusbar{height:47px;flex-shrink:0;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 6px;font-size:12px;font-weight:600;color:#1a1a1a;position:relative;z-index:10;background:transparent;}
+
+/* ── Androidフレーム ── */
+.frame-android{
+  width:375px;height:812px;
+  position:relative;overflow:hidden;
+  border-radius:20px;background:#f0faf8;
+  box-shadow:0 0 0 2px #606060,0 0 0 11px #1a1a1a,0 0 0 14px #2a2a2a,0 40px 100px rgba(0,0,0,0.4);
+  display:flex;flex-direction:column;
+}
+.android-statusbar{height:36px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 20px 0 28px;font-size:11px;font-weight:600;color:#1a1a1a;position:relative;z-index:10;background:transparent;}
+.android-camera{width:12px;height:12px;border-radius:50%;background:#1c1c1e;position:absolute;top:10px;left:50%;transform:translateX(-50%);}
+.android-navbar{position:absolute;bottom:0;left:0;right:0;height:28px;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;gap:40px;z-index:150;}
+.android-nav-btn{font-size:18px;opacity:0.5;}
+
+/* ── 共通スクリーン ── */
+.screen{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:82px;}
+.screen::-webkit-scrollbar{display:none}
+::-webkit-scrollbar{display:none}
+
+/* ── ボトムナビ ── */
+.nav{position:absolute;bottom:0;left:0;right:0;height:80px;background:rgba(255,255,255,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(77,184,158,0.15);display:flex;align-items:flex-start;padding-top:10px;z-index:100;}
+.frame-android .nav{bottom:28px;border-radius:0;height:72px;}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#b0c8c0;font-size:10px;font-weight:600;padding:4px 0;font-family:inherit;}
+.nav-btn.active{color:#4DB89E}
+.nav-icon{font-size:20px;line-height:1}
+.fab-wrap{flex:1;display:flex;flex-direction:column;align-items:center;position:relative;top:-20px;gap:2px;}
+.fab{width:54px;height:54px;background:linear-gradient(145deg,#5DCBA8,#3da888);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(77,184,158,0.5);cursor:pointer;border:none;font-size:26px;color:white;font-family:inherit;}
+.fab-label{font-size:10px;color:#4DB89E;font-weight:700;}
+
+/* ── パンダヘッダー（画像背景） ── */
+.panda-header{
+  position:relative;
+  height:240px;
+  overflow:hidden;
+  flex-shrink:0;
+  background-image:url("images/panda_header.jpg");
+  background-size:cover;
+  background-position:center top;
+  background-repeat:no-repeat;
+}
+/* オーバーレイで底をフェード */
+.panda-header::after{
+  content:'';
+  position:absolute;
+  bottom:0;left:0;right:0;height:55px;
+  background:linear-gradient(to bottom,rgba(240,250,248,0) 0%,rgba(240,250,248,0.85) 60%,rgba(240,250,248,1) 100%);
+  pointer-events:none;
+}
+/* AIバナー */
+.ai-banner{position:absolute;top:14px;left:12px;max-width:200px;z-index:5;}
+.ai-inner{background:rgba(255,255,255,0.92);backdrop-filter:blur(10px);border-radius:14px;padding:9px 12px;border:1px solid rgba(255,255,255,0.5);box-shadow:0 4px 14px rgba(0,0,0,0.1);}
+.ai-inner strong{display:block;font-size:13px;color:#1a4838;margin-bottom:2px;line-height:1.3}
+.ai-inner span{font-size:10px;color:#3a7060;line-height:1.5}
+/* 進捗リング */
+.ring-wrap{position:absolute;top:14px;right:12px;display:flex;flex-direction:column;align-items:center;gap:2px;background:rgba(255,255,255,0.92);backdrop-filter:blur(10px);border-radius:50%;width:74px;height:74px;justify-content:center;border:1px solid rgba(255,255,255,0.5);box-shadow:0 4px 14px rgba(0,0,0,0.1);z-index:5;}
+.ring-label{font-size:8px;color:#3ea880;font-weight:700;text-align:center;line-height:1.2;margin-top:1px;}
+
+/* ── カード ── */
+.card{background:white;border-radius:20px;padding:15px 17px;margin:0 13px 11px;box-shadow:0 2px 14px rgba(0,0,0,0.055);}
+.card-title{font-size:13px;font-weight:700;color:#1a5044;margin-bottom:10px;}
+
+/* ── ボタン ── */
+.btn{display:block;width:100%;padding:14px 18px;border-radius:14px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;border:none;}
+.btn:active{opacity:0.88}
+.btn-primary{background:linear-gradient(135deg,#5DCBA8,#3da888);color:white;box-shadow:0 5px 18px rgba(77,184,158,0.4);}
+.btn-primary:disabled{background:#cce4dc;box-shadow:none;color:#90b0a8;}
+.btn-outline{background:white;border:2.5px solid #4DB89E;color:#4DB89E;}
+.btn-ghost{background:none;border:none;color:#8ab0a8;font-size:13px;padding:11px;cursor:pointer;font-family:inherit;width:100%;}
+
+/* ── チップ ── */
+.chip{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:999px;font-size:13px;font-weight:600;border:2px solid #d0e8e2;background:white;color:#5a8078;cursor:pointer;font-family:inherit;}
+.chip.sel{background:#4DB89E;border-color:#4DB89E;color:white;}
+
+/* ── 種目グリッド ── */
+.act-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:10px 0}
+.act-btn{background:white;border:2px solid #e4f0ec;border-radius:16px;padding:14px 6px 11px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-family:inherit;}
+.act-btn.sel{background:#ecfaf5;border-color:#4DB89E;}
+.act-icon{font-size:28px}
+.act-lbl{font-size:11px;font-weight:700;color:#4a6860;}
+.act-btn.sel .act-lbl{color:#2a8060;}
+
+/* ── 入力 ── */
+input.field,textarea.field{width:100%;border:2px solid #dceee8;border-radius:12px;padding:12px 14px;font-size:14px;font-family:inherit;outline:none;background:white;transition:border-color 0.2s;color:#1a3030;}
+input.field:focus,textarea.field:focus{border-color:#4DB89E}
+textarea.field{resize:none;min-height:70px;line-height:1.6}
+label.lbl{font-size:12px;font-weight:700;color:#4a8878;margin-bottom:5px;display:block}
+
+/* ── タイムライン ── */
+.post{background:white;border-radius:20px;padding:13px 15px;margin:0 13px 10px;box-shadow:0 2px 10px rgba(0,0,0,0.05);}
+.post-head{display:flex;align-items:center;gap:9px;margin-bottom:7px}
+.avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:white;flex-shrink:0;}
+.post-name{font-size:13px;font-weight:700;color:#1a3030}
+.post-sub{font-size:11px;color:#b0c0bc;margin-top:1px}
+.act-tag{display:inline-flex;align-items:center;gap:3px;background:#edfaf5;color:#3da880;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+.post-body{font-size:13px;color:#3a4a46;line-height:1.7;margin:5px 0 9px}
+.post-foot{display:flex;gap:14px;padding-top:8px;border-top:1px solid #f0f7f5}
+.post-foot button{display:flex;align-items:center;gap:5px;font-size:12px;color:#b0c0bc;background:none;border:none;cursor:pointer;font-family:inherit;font-weight:600;padding:3px 0;}
+.post-foot button.liked{color:#ff6b6b}
+
+/* ── 統計 ── */
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.stat-box{background:#f0faf8;border-radius:14px;padding:12px 6px;text-align:center;}
+.stat-num{font-size:23px;font-weight:800;color:#1a5044}
+.stat-unit{font-size:10px;color:#4DB89E;font-weight:700;margin-top:1px}
+.stat-lbl{font-size:10px;color:#90a8a0;margin-top:2px}
+
+/* ── 週ドット ── */
+.week-dots{display:flex;gap:5px;margin-top:9px}
+.wdot{flex:1;aspect-ratio:1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;}
+.wdot.done{background:#4DB89E;color:white}
+.wdot.empty{background:#e4f0ec;color:#a0c0b8}
+.wdot.today{box-shadow:0 0 0 2.5px #4DB89E;background:#edfaf5;color:#4DB89E}
+
+/* ── モーダル ── */
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,0.42);z-index:200;display:flex;align-items:flex-end;}
+.sheet{width:100%;background:#f4faf8;border-radius:28px 28px 0 0;padding:18px 15px calc(20px + 80px);max-height:90%;overflow-y:auto;scrollbar-width:none;}
+.grab{width:36px;height:4px;background:#c8e0da;border-radius:2px;margin:0 auto 16px}
+
+/* ── ログイン専用ヘッダー（より高い） ── */
+.login-hero{
+  height:380px;flex-shrink:0;position:relative;overflow:hidden;
+  background-image:url("images/panda_header.jpg");
+  background-size:cover;
+  background-position:center top;
+}
+.login-hero::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:80px;
+  background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0.95) 70%,white 100%);
+  pointer-events:none;
+}
+.login-form{flex:1;background:white;padding:0 20px 40px;position:relative;z-index:2;overflow-y:auto;margin-top:-30px;}
+
+/* ── オンボード ── */
+.step-dots{display:flex;gap:6px;margin-bottom:16px}
+.step-dot{height:4px;border-radius:2px;flex:1;background:#cce4dc;}
+.step-dot.done{background:#4DB89E}
+
+/* ── 記録行 ── */
+.rec-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f0f7f5;}
+.rec-row:last-child{border-bottom:none}
+.rec-tag{background:#edfaf5;color:#3da880;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;}
+
+/* ── アニメ ── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp 0.28s ease forwards}
+@keyframes blink{0%,80%,100%{transform:scale(0.55);opacity:0.45}40%{transform:scale(1);opacity:1}}
+.dot-anim span{display:inline-block;width:7px;height:7px;border-radius:50%;background:#4DB89E;animation:blink 1.2s ease-in-out infinite;margin:0 2px;}
+.dot-anim span:nth-child(2){animation-delay:0.16s}
+.dot-anim span:nth-child(3){animation-delay:0.32s}
+.toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:#1a3030;color:white;padding:8px 18px;border-radius:999px;font-size:12px;font-weight:600;z-index:300;white-space:nowrap;animation:fadeUp 0.2s ease;}
+
+/* AI褒め */
+.praise-card{background:white;border-radius:22px;padding:22px 18px;margin:0 13px 11px;box-shadow:0 4px 22px rgba(0,0,0,0.08);}
+.check-circle{width:56px;height:56px;border-radius:50%;background:linear-gradient(145deg,#5DCBA8,#3da888);display:flex;align-items:center;justify-content:center;font-size:25px;margin:0 auto 13px;box-shadow:0 8px 22px rgba(77,184,158,0.4);}
+.praise-label{display:inline-block;background:#edfaf5;color:#3da880;padding:4px 14px;border-radius:999px;font-size:12px;font-weight:700;margin-bottom:13px;}
+.praise-msg{font-size:14px;color:#1a3030;line-height:1.8;text-align:left}
+.voice-btn{display:flex;align-items:center;gap:9px;background:#f4fcf8;border:1.5px solid #d0ede5;border-radius:14px;padding:11px 13px;width:100%;margin-top:13px;cursor:pointer;font-family:inherit;}
+
+/* Androidスタイル差分 */
+.android .btn-primary{border-radius:8px;}
+.android .card{border-radius:16px;}
+.android .chip{border-radius:8px;}
+.android .act-btn{border-radius:12px;}
+.android input.field,.android textarea.field{border-radius:8px;}
+.android .post{border-radius:14px;}
+.android .praise-card{border-radius:16px;}
+
+
+/* ── パンダ感情カード ── */
+.panda-emotion-card{display:flex;gap:12px;align-items:center;border:1.5px solid #dceee8;border-radius:20px;padding:13px 12px;margin:0 0 12px;box-shadow:0 4px 16px rgba(77,184,158,0.10);position:relative;overflow:hidden;}
+.panda-emotion-card::after{content:'';position:absolute;right:-24px;top:-28px;width:82px;height:82px;border-radius:50%;background:rgba(255,255,255,0.52);pointer-events:none;}
+.panda-emotion-face-wrap{width:58px;height:58px;border-radius:22px;background:rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,0.06);}
+.panda-emotion-face{font-size:35px;line-height:1;animation:pandaPop 0.32s ease;}
+.panda-emotion-sparkle{position:absolute;right:-5px;top:-7px;font-size:17px;animation:pandaFloat 1.8s ease-in-out infinite;}
+.panda-emotion-title{font-size:14px;font-weight:900;color:#1a5044;}
+.panda-emotion-tag{font-size:10px;font-weight:900;color:#3da888;background:rgba(255,255,255,0.78);border:1px solid rgba(77,184,158,0.18);border-radius:999px;padding:4px 8px;}
+.panda-emotion-line{font-size:12px;color:#3f5d55;line-height:1.65;font-weight:700;}
+.panda-emotion-tip{font-size:11px;color:#4DB89E;font-weight:800;margin-top:7px;background:rgba(255,255,255,0.72);border-radius:12px;padding:7px 9px;line-height:1.45;}
+@keyframes pandaPop{0%{opacity:0;transform:scale(.65) rotate(-8deg)}70%{transform:scale(1.08) rotate(3deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+@keyframes pandaFloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-4px) rotate(8deg)}}
+
+/* === ゆるトレパンダ表情パーツ v2 === */
+.panda-mascot{position:relative;width:72px;height:78px;display:inline-block;animation:pandaPop .32s ease;filter:drop-shadow(0 5px 8px rgba(58,45,35,.10));--eyeY:18px;--eyeRotL:12deg;--eyeRotR:-12deg;--mouthW:12px;--mouthH:7px;--mouthBorder:3px;--pawL:10px;--pawR:10px;--pawY:42px;--pawRotL:-25deg;--pawRotR:25deg;}
+.panda-sm{width:54px;height:58px;transform:scale(.86);transform-origin:center;}
+.panda-xs{width:40px;height:43px;transform:scale(.64);transform-origin:center;}
+.panda-ear{position:absolute;top:2px;width:20px;height:20px;background:#292522;border-radius:50%;z-index:1;}
+.panda-ear.left{left:10px}.panda-ear.right{right:10px}
+.panda-head{position:absolute;left:7px;top:10px;width:58px;height:50px;background:#fffdfa;border:2px solid #3a302b;border-radius:48% 48% 45% 45%;z-index:2;}
+.panda-eye-patch{position:absolute;top:var(--eyeY);width:17px;height:20px;background:#2b2927;border-radius:55% 48% 55% 45%;display:flex;align-items:center;justify-content:center;}
+.panda-eye-patch.left{left:10px;transform:rotate(var(--eyeRotL));}.panda-eye-patch.right{right:10px;transform:rotate(var(--eyeRotR));}
+.panda-eye-patch span{width:5px;height:5px;background:#fff;border-radius:50%;display:block;box-shadow:1px 1px 0 #151515;}
+.panda-blush{position:absolute;top:32px;width:11px;height:6px;background:#ffb6b8;border-radius:999px;opacity:.75;filter:blur(.2px)}
+.panda-blush.left{left:8px}.panda-blush.right{right:8px}
+.panda-nose{position:absolute;left:50%;top:30px;width:8px;height:6px;background:#2b2927;border-radius:50%;transform:translateX(-50%);}
+.panda-mouth{position:absolute;left:50%;top:37px;width:var(--mouthW);height:var(--mouthH);border-bottom:var(--mouthBorder) solid #2b2927;border-radius:0 0 999px 999px;transform:translateX(-50%);}
+.panda-body{position:absolute;left:17px;top:54px;width:38px;height:25px;background:#282420;border-radius:45% 45% 35% 35%;z-index:1;}
+.panda-belly{position:absolute;left:7px;top:2px;width:24px;height:19px;background:#fffdfa;border-radius:50%;}
+.panda-paw{position:absolute;top:var(--pawY);width:15px;height:23px;background:#282420;border-radius:999px;z-index:3;}
+.panda-paw.left{left:var(--pawL);transform:rotate(var(--pawRotL));}.panda-paw.right{right:var(--pawR);transform:rotate(var(--pawRotR));}
+.panda-prop,.panda-badge-mark{position:absolute;z-index:4;pointer-events:none;}
+.panda-happy{--pawY:36px;--pawL:4px;--pawR:4px;--pawRotL:-42deg;--pawRotR:42deg;--mouthW:16px;--mouthH:9px;}
+.panda-happy .panda-prop::before{content:'✨';position:absolute;left:-4px;top:7px;font-size:13px;}
+.panda-tired{--eyeY:22px;--mouthW:11px;--mouthH:1px;--mouthBorder:2px;--pawY:48px;}
+.panda-tired{transform:rotate(-4deg);}
+.panda-tired .panda-body{top:58px;transform:scaleX(1.25);}
+.panda-tired .panda-prop::before{content:'💨';position:absolute;left:-8px;top:37px;font-size:13px;opacity:.65;}
+.panda-sleepy{--eyeY:22px;--mouthW:8px;--mouthH:2px;--mouthBorder:2px;--pawY:47px;}
+.panda-sleepy .panda-prop::before{content:'💤';position:absolute;right:-5px;top:2px;font-size:15px;color:#8aa8d8;}
+.panda-sleepy .panda-head{transform:rotate(-7deg);}
+.panda-food{--mouthW:13px;--mouthH:4px;--pawY:48px;}
+.panda-food .panda-body{height:31px;border-radius:48%;}
+.panda-food .panda-belly{width:30px;height:23px;left:4px;}
+.panda-food .panda-prop::before{content:'♡';position:absolute;right:1px;top:18px;color:#ff8c98;font-weight:900;font-size:18px;}
+.panda-comeback{--pawY:36px;--pawL:9px;--pawR:2px;--pawRotL:-8deg;--pawRotR:48deg;--mouthW:15px;--mouthH:8px;}
+.panda-comeback .panda-paw.right{animation:pandaWave 1.3s ease-in-out infinite;transform-origin:50% 100%;}
+.panda-done{--pawY:34px;--pawL:3px;--pawR:3px;--pawRotL:-45deg;--pawRotR:45deg;--mouthW:17px;--mouthH:10px;}
+.panda-done .panda-badge-mark::before{content:'♪';position:absolute;right:4px;top:7px;color:#e67a90;font-size:17px;font-weight:900;}
+.panda-crown{--mouthW:14px;--mouthH:8px;}
+.panda-crown .panda-badge-mark::before{content:'👑';position:absolute;left:24px;top:-7px;font-size:17px;}
+.panda-morning{--pawY:35px;--pawL:4px;--pawR:4px;--pawRotL:-44deg;--pawRotR:44deg;--mouthW:15px;--mouthH:8px;}
+.panda-morning .panda-prop::before{content:'☀️';position:absolute;right:-7px;top:-5px;font-size:16px;}
+.panda-night{--eyeY:20px;--mouthW:10px;--mouthH:3px;--mouthBorder:2px;}
+.panda-night .panda-prop::before{content:'🌙';position:absolute;right:-6px;top:-3px;font-size:16px;}
+.panda-emotion-face-wrap{width:82px!important;height:82px!important;border-radius:26px!important;background:rgba(255,255,255,0.72)!important;}
+@keyframes pandaWave{0%,100%{transform:rotate(48deg)}50%{transform:rotate(68deg) translateY(-2px)}}
+
+/* ── 気分ボタン：文字がパンダに隠れない安全レイアウト ── */
+.mood-choice-card{
+  min-height:142px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:space-between;
+  gap:5px;
+  background:#fff;
+  color:#32544c;
+  border:2px solid #e4f0ec;
+  border-radius:18px;
+  padding:10px 8px 9px;
+  font-family:inherit;
+  cursor:pointer;
+  box-shadow:0 3px 10px rgba(77,184,158,.06);
+  transition:.18s;
+  overflow:hidden;
+  position:relative;
+}
+.mood-choice-card.selected{
+  background:linear-gradient(135deg,#5DCBA8,#3da888);
+  color:#fff;
+  border-color:#4DB89E;
+  box-shadow:0 7px 18px rgba(77,184,158,.28);
+  transform:translateY(-1px);
+}
+.mood-choice-label{
+  position:relative;
+  z-index:3;
+  font-size:15px;
+  font-weight:900;
+  line-height:1.15;
+  padding:5px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,.88);
+  color:#1a5044;
+  box-shadow:0 2px 8px rgba(255,255,255,.65);
+  white-space:nowrap;
+}
+.mood-choice-card.selected .mood-choice-label{
+  background:rgba(255,255,255,.96);
+  color:#23836d;
+}
+.mood-panda-face{
+  width:76px;
+  height:58px;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  overflow:hidden;
+  position:relative;
+  z-index:1;
+  flex:0 0 58px;
+}
+.mood-panda-face .panda-mascot{
+  margin-top:-2px;
+  transform:scale(.92);
+  transform-origin:top center;
+}
+.mood-face-tired .panda-mascot{margin-top:1px;transform:scale(.88) rotate(-4deg);}
+.mood-face-sleepy .panda-mascot{margin-top:1px;transform:scale(.88);}
+.mood-choice-tone{
+  position:relative;
+  z-index:3;
+  min-height:17px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:10px;
+  font-weight:900;
+  line-height:1.2;
+  opacity:.78;
+  background:rgba(255,255,255,.72);
+  color:#476d63;
+  border-radius:999px;
+  padding:4px 8px;
+  white-space:nowrap;
+}
+.mood-choice-card.selected .mood-choice-tone{
+  opacity:1;
+  color:#1f7c67;
+  background:rgba(255,255,255,.92);
+}
+
+
+/* ── ごほうび・思い出アルバム ── */
+.reward-garden{background:linear-gradient(135deg,#fffdf4,#f1fff7);border:1.5px solid rgba(77,184,158,.18)}
+.reward-main{display:flex;gap:10px;align-items:stretch;margin-bottom:12px}
+.reward-panda{flex:1.25;display:flex;gap:10px;align-items:center;background:white;border:1px solid #e8f3ef;border-radius:18px;padding:12px}
+.reward-panda-face{width:54px;height:54px;border-radius:20px;background:linear-gradient(135deg,#fff,#e9fbf4);display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 6px 16px rgba(77,184,158,.12);animation:rewardPop .7s ease both}
+.reward-panda-face.cheek{background:linear-gradient(135deg,#fff,#ffeaf0)}
+.reward-panda-face.scarf{background:linear-gradient(135deg,#fff4f7,#eef8ff)}
+.reward-panda-face.legend{background:linear-gradient(135deg,#fff8d8,#fff)}
+.reward-title{font-size:15px;font-weight:900;color:#1a5044}
+.reward-label{font-size:11px;color:#4DB89E;font-weight:800;margin-top:3px}
+.reward-next{font-size:10px;color:#9bb8b0;line-height:1.45;margin-top:4px}
+.plant-box{flex:1;background:#fffaf2;border:1px solid #f3e4c8;border-radius:18px;padding:11px;text-align:center}
+.plant-emoji{font-size:32px;line-height:1;margin-bottom:4px;animation:plantSway 1.6s ease-in-out infinite alternate}
+.plant-name{font-size:12px;font-weight:900;color:#7d5a20}
+.plant-msg{font-size:10px;color:#9b7b4c;line-height:1.45;margin-top:4px}
+.reward-list{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+.reward-chip{border-radius:999px;background:#f4f8f6;border:1px solid #e4efeb;color:#b8c8c2;padding:7px 9px;font-size:10px;font-weight:800;display:flex;gap:5px;align-items:center}
+.reward-chip.ok{background:#e7f7f1;color:#3da888;border-color:#cdeee2}
+.memory-card{background:linear-gradient(135deg,#ffffff,#fffaf2);border:1.5px solid rgba(240,190,95,.22)}
+.memory-hero{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#fff;border:1px solid #f0eadf;border-radius:18px;padding:13px}
+.memory-tag{display:inline-block;font-size:10px;font-weight:900;color:#c29244;background:#fff3d8;border-radius:999px;padding:5px 8px;margin-bottom:7px}
+.memory-title{font-size:17px;font-weight:900;color:#1a5044;margin-bottom:4px}
+.memory-body{font-size:12px;color:#4a7060;line-height:1.7;font-weight:650}
+.memory-panda{width:54px;height:54px;border-radius:20px;background:#e9fbf4;display:flex;align-items:center;justify-content:center;font-size:30px;flex-shrink:0}
+.memory-months{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.memory-months div{background:#f8fffc;border:1px solid #e8f3ef;border-radius:14px;padding:9px}
+.memory-months b{display:block;font-size:13px;color:#1a5044;margin-bottom:3px}
+.memory-months span{font-size:10px;color:#7aada0;line-height:1.4}
+.reward-popup{width:310px;max-width:calc(100% - 40px);background:white;border-radius:28px;padding:24px 20px;text-align:center;box-shadow:0 20px 70px rgba(0,0,0,.22);animation:rewardPop .35s ease both}
+.confetti{font-size:18px;margin-bottom:5px;letter-spacing:3px}
+.reward-big{font-size:60px;margin-bottom:8px;animation:plantSway 1s ease-in-out infinite alternate}
+.reward-popup-title{font-size:13px;font-weight:900;color:#4DB89E;margin-bottom:4px}
+.reward-popup-name{font-size:24px;font-weight:900;color:#1a5044;margin-bottom:8px}
+.reward-popup-text{font-size:13px;color:#4a7060;line-height:1.7;margin-bottom:16px;font-weight:700}
+.period-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.period-tabs button,.mini-btn{border:1.5px solid #dceee8;background:white;color:#7aada0;border-radius:999px;padding:8px 6px;font-size:11px;font-weight:900;font-family:inherit;cursor:pointer}
+.period-tabs button.active{background:#4DB89E;color:white;border-color:#4DB89E;box-shadow:0 6px 14px rgba(77,184,158,.24)}
+.week-bars{display:flex;align-items:flex-end;gap:5px;height:86px}
+.month-heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.year-heatmap{display:grid;grid-template-columns:repeat(14,1fr);gap:4px;max-height:150px;overflow:hidden}
+.heat-dot{height:20px;border-radius:7px;background:#f4f8f6;border:1px solid #e4efeb;font-size:8px;color:#9bb8b0;display:flex;align-items:center;justify-content:center;font-weight:800}
+.year-heatmap .heat-dot{height:10px;border-radius:3px;font-size:0}
+.heat-dot.done{background:#8dd8c0;border-color:#7bd0b6}
+.heat-dot.today{outline:2px solid #f0d28a}
+@keyframes rewardPop{from{opacity:0;transform:scale(.86) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes plantSway{from{transform:rotate(-3deg) translateY(0)}to{transform:rotate(3deg) translateY(-2px)}}
+
+
+/* ── 写真保存機能 ── */
+.photo-picker-box{
+  margin:14px 0;
+  background:linear-gradient(135deg,#ffffff,#f6fffb);
+  border:1.5px dashed #cfeee2;
+  border-radius:18px;
+  padding:12px;
+}
+.photo-loading{
+  font-size:12px;
+  color:#4DB89E;
+  font-weight:800;
+  background:#e9fbf4;
+  border-radius:12px;
+  padding:9px 10px;
+}
+.photo-error{
+  font-size:12px;
+  color:#d85858;
+  font-weight:800;
+  background:#fff1f1;
+  border-radius:12px;
+  padding:9px 10px;
+}
+.photo-preview-wrap{
+  position:relative;
+  overflow:hidden;
+  border-radius:16px;
+  border:1px solid #e2f2ec;
+  background:#fff;
+  box-shadow:0 6px 18px rgba(77,184,158,0.12);
+}
+.photo-preview{
+  width:100%;
+  height:170px;
+  object-fit:cover;
+  display:block;
+}
+.photo-remove{
+  position:absolute;
+  top:8px;
+  right:8px;
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  border:none;
+  background:rgba(20,40,36,0.72);
+  color:#fff;
+  font-size:18px;
+  line-height:1;
+  cursor:pointer;
+}
+.photo-caption{
+  font-size:11px;
+  color:#6a9d90;
+  font-weight:800;
+  padding:8px 10px 10px;
+  background:#fff;
+}
+.rec-row{
+  gap:8px;
+}
+.rec-thumb{
+  width:46px;
+  height:46px;
+  border-radius:12px;
+  object-fit:cover;
+  border:2px solid #eef7f4;
+  flex-shrink:0;
+}
+.rec-photo-mark{
+  margin-top:4px;
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  font-size:10px;
+  color:#4DB89E;
+  font-weight:800;
+  background:#e9fbf4;
+  border-radius:999px;
+  padding:3px 7px;
+}
+.post-photo{
+  width:100%;
+  max-height:220px;
+  object-fit:cover;
+  border-radius:16px;
+  margin:9px 0 10px;
+  border:1px solid #edf5f2;
+  box-shadow:0 4px 14px rgba(20,80,68,0.08);
+}
+
+/* ゆるトレ語録リアクション */
+.reaction-panel{margin-top:10px;padding:10px;border-radius:16px;background:linear-gradient(135deg,#fffdf7,#f4fffb);border:1.5px solid #e3f2ec;}
+.reaction-title{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#6a8f84;margin-bottom:8px;letter-spacing:.03em;}
+.reaction-title span{background:#ffefc7;color:#b77a00;border-radius:999px;padding:2px 7px;font-size:10px;}
+.yuru-reactions{display:flex;flex-wrap:wrap;gap:7px;overflow:visible;padding-bottom:0;-webkit-overflow-scrolling:auto;}
+.yuru-reaction{flex:0 0 auto;display:flex;align-items:center;gap:5px;background:white;border:1.5px solid #dcefe8;border-radius:999px;padding:7px 10px;color:#31564c;font-family:inherit;font-size:11px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(45,91,77,.06);transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease;}
+.yuru-reaction:hover{transform:translateY(-1px);box-shadow:0 6px 15px rgba(45,91,77,.12);}
+.yuru-reaction.active{background:linear-gradient(135deg,#fff2bd,#ffe0ec);border-color:#ffbd6e;color:#7c4c00;transform:translateY(-1px) scale(1.03);}
+.reaction-emoji{font-size:16px;line-height:1;}
+.reaction-label{white-space:nowrap;}
+@media (min-width:520px){.yuru-reaction{flex:1 1 calc(33.333% - 7px);}}
+@media (max-width:360px){.yuru-reaction{min-width:104px;font-size:10.5px;padding:7px 7px}.reaction-emoji{font-size:15px}}
+.reaction-bubble{margin-top:8px;background:white;border:1.5px solid #ffe0aa;border-radius:13px;padding:8px 10px;color:#6a4d24;font-size:11px;font-weight:700;line-height:1.45;animation:reactionPop .22s ease-out;}
+.reaction-mini{margin-top:7px;color:#8aa8a0;font-size:10.5px;font-weight:700;}
+@keyframes reactionPop{from{opacity:0;transform:translateY(5px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+.post-foot{gap:10px;}
+.post-foot button{background:#f7fbfa!important;border:1px solid #e3f2ec!important;border-radius:999px!important;padding:7px 11px!important;color:#6a8f84!important;}
+
+
+/* ── パンダルーム ── */
+.panda-room-card{background:linear-gradient(135deg,#fffdf7,#f2fff9);border:1.5px solid rgba(77,184,158,.18);overflow:hidden;}
+.room-level-badge{font-size:10px;font-weight:900;color:#4DB89E;background:#e9fbf4;border:1px solid #cdeee2;border-radius:999px;padding:7px 9px;white-space:nowrap;}
+.panda-room-stage{position:relative;height:205px;border-radius:24px;overflow:hidden;background:linear-gradient(180deg,#dff8ff 0%,#fff8e8 62%,#e8d1aa 63%,#f4dfbc 100%);border:2px solid #e8f3ef;box-shadow:inset 0 -24px 0 rgba(164,116,65,.06);}
+.room-wall-deco{position:absolute;left:18px;top:16px;font-size:25px;opacity:.75;animation:floaty 3.6s ease-in-out infinite;}
+.room-window{position:absolute;right:22px;top:17px;width:56px;height:43px;border-radius:16px;background:#ffffffbb;border:2px solid #bdeee4;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 6px 18px rgba(0,0,0,.06);}
+.room-floor{position:absolute;left:-10%;right:-10%;bottom:-30px;height:86px;border-radius:50% 50% 0 0;background:radial-gradient(circle at 50% 20%,rgba(255,255,255,.35),rgba(255,255,255,0) 60%);pointer-events:none;}
+.room-panda{position:absolute;left:50%;bottom:31px;transform:translateX(-50%);width:76px;height:76px;display:flex;align-items:center;justify-content:center;z-index:3;filter:drop-shadow(0 8px 10px rgba(0,0,0,.12));animation:roomPanda 3.2s ease-in-out infinite;}
+.room-item{position:absolute;z-index:2;width:38px;height:38px;border-radius:16px;background:white;display:flex;align-items:center;justify-content:center;font-size:23px;border:1px solid #e7f3ef;box-shadow:0 6px 16px rgba(0,0,0,.08);transition:transform .2s,filter .2s,opacity .2s;}
+.room-item.unlocked{animation:itemPop .55s ease both;}
+.room-item.locked{filter:grayscale(1);opacity:.45;background:#f5f5f5;color:#aaa;font-size:17px;}
+.room-progress{margin-top:10px;font-size:11px;color:#6d9f94;font-weight:800;display:flex;align-items:center;gap:10px;}
+.room-progress b{font-size:15px;color:#1a5044;}
+.room-progress-bar{flex:1;height:9px;background:#edf7f3;border-radius:999px;overflow:hidden;border:1px solid #dceee8;}
+.room-progress-bar span{display:block;height:100%;background:linear-gradient(90deg,#4DB89E,#9bdc86);border-radius:999px;transition:width .35s;}
+.next-room-item{margin-top:9px;background:#fffaf0;border:1px solid #f3e4c8;border-radius:16px;padding:10px 11px;font-size:11px;color:#916d2c;font-weight:800;line-height:1.45;}
+.next-room-item b{color:#4a3a20;margin-left:3px;}
+.next-room-item span{display:block;color:#b58b44;font-size:10px;margin-top:2px;font-weight:700;}
+.room-item-book{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:10px;}
+.room-book-chip{display:flex;align-items:center;gap:7px;background:#f7fbfa;border:1px solid #e4efeb;border-radius:14px;padding:8px;min-width:0;}
+.room-book-chip.ok{background:#f0fff8;border-color:#cdeee2;}
+.room-book-chip span{font-size:17px;flex-shrink:0;}
+.room-book-chip b{display:block;font-size:10px;color:#1a5044;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.room-book-chip em{display:block;font-size:9px;color:#8ab0a8;font-style:normal;margin-top:2px;line-height:1.25;}
+@keyframes roomPanda{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-4px)}}
+@keyframes itemPop{0%{transform:scale(.82);opacity:.1}65%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+@media (max-width:430px){.panda-room-stage{height:195px}.room-item-book{grid-template-columns:1fr 1fr}.room-book-chip{padding:7px}.room-book-chip b{font-size:9.5px}.room-book-chip em{font-size:8.5px}}
+
+
+/* パンダ相談室 */
+
+.panda-chat-card{background:linear-gradient(135deg,#fffdf8,#f2fff9);border:1.5px solid rgba(77,184,158,.18)}
+.panda-chat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+.panda-chat-sub{font-size:11px;color:#7aada0;font-weight:800;line-height:1.5}
+.panda-chat-level{background:#e9fbf4;color:#3da888;border-radius:16px;padding:7px 10px;font-size:11px;font-weight:900;text-align:center;white-space:nowrap}
+.panda-chat-level span{display:block;font-size:10px;color:#7aada0;margin-top:2px}
+.panda-chat-hero{display:flex;gap:10px;align-items:center;background:white;border:1px solid #e3f2ed;border-radius:18px;padding:10px;margin-bottom:10px;box-shadow:0 4px 14px rgba(77,184,158,.08)}
+.panda-chat-face{width:50px;height:50px;border-radius:18px;background:#fff1d8;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
+.panda-chat-bubble{font-size:13px;line-height:1.65;color:#35544c;font-weight:800}
+.panda-chat-quick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.panda-chat-quick{border:1px solid #dceee8;background:#fff;border-radius:15px;padding:9px 7px;font-size:11px;font-weight:900;color:#31574e;display:flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.04);cursor:pointer;font-family:inherit}
+.panda-chat-quick:active{transform:scale(.97)}
+.panda-chat-input-row{display:flex;gap:7px;margin-bottom:9px}
+.panda-chat-input-row input{flex:1;border:1.5px solid #dceee8;background:white;border-radius:15px;padding:10px 11px;font-size:12px;font-family:inherit;outline:none;color:#1a5044}
+.panda-chat-input-row input:focus{border-color:#7bd7bd;box-shadow:0 0 0 3px rgba(77,184,158,.12)}
+.panda-chat-input-row button{border:none;background:linear-gradient(135deg,#5DCBA8,#3da888);color:white;border-radius:15px;padding:0 14px;font-size:12px;font-weight:900;font-family:inherit;cursor:pointer;box-shadow:0 4px 12px rgba(77,184,158,.25)}
+.panda-chat-log{display:flex;flex-direction:column;gap:7px;max-height:190px;overflow:auto;padding-right:2px}
+.panda-chat-log-item{background:#ffffff;border:1px solid #edf5f2;border-radius:14px;padding:8px 9px}
+.panda-chat-me{font-size:11px;color:#87a8a0;font-weight:800;margin-bottom:4px}
+.panda-chat-panda{font-size:12px;color:#31574e;line-height:1.55;font-weight:800}
+@media(max-width:420px){.panda-chat-quick-grid{grid-template-columns:repeat(2,1fr)}.panda-chat-head{flex-direction:column}.panda-chat-level{text-align:left}}
+
+/* === パンダルーム Ver2：本物の部屋風レイアウト === */
+.room-v2-card{background:linear-gradient(135deg,#fffdf7,#f0fff8);}
+.room-v2-stage{height:255px;background:linear-gradient(180deg,#fff7df 0%,#fff9e9 58%,#e9c99b 59%,#f7dfb8 100%);border:2px solid #f0e3cf;box-shadow:inset 0 -34px 0 rgba(150,98,42,.08),0 10px 24px rgba(105,83,40,.08);}
+.room-back-wall{position:absolute;inset:0 0 38%;background:radial-gradient(circle at 20% 28%,rgba(255,255,255,.55),rgba(255,255,255,0) 28%),linear-gradient(90deg,rgba(255,210,170,.22) 1px,transparent 1px),linear-gradient(180deg,#fff7df,#fff1d6);background-size:auto,28px 100%,auto;z-index:0;}
+.room-baseboard{position:absolute;left:0;right:0;bottom:0;height:9px;background:linear-gradient(90deg,#d5a56a,#f0c78d,#d5a56a);border-top:2px solid rgba(129,82,33,.15);}
+.room-floor-area{position:absolute;left:0;right:0;bottom:0;height:45%;background:repeating-linear-gradient(90deg,#eac58d 0 28px,#f1d29f 28px 56px);z-index:0;}
+.room-floor-area:before{content:"";position:absolute;left:0;right:0;top:0;height:100%;background:linear-gradient(180deg,rgba(255,255,255,.32),rgba(255,255,255,0));}
+.room-rug{position:absolute;left:50%;bottom:17px;transform:translateX(-50%);width:178px;height:58px;border-radius:50%;background:radial-gradient(circle at 50% 45%,#fff6ce 0 42%,#ffd8b8 43% 100%);border:3px solid rgba(255,255,255,.8);box-shadow:0 8px 14px rgba(124,76,36,.16);}
+.room-shadow{position:absolute;left:50%;bottom:48px;transform:translateX(-50%);width:92px;height:20px;border-radius:50%;background:rgba(100,64,35,.12);filter:blur(2px);}
+.room-v2-stage .room-window{right:18px;top:17px;width:62px;height:52px;border-radius:18px;background:linear-gradient(180deg,#dff8ff,#fff);border:3px solid #fff;box-shadow:0 7px 18px rgba(137,106,61,.12);font-size:22px;z-index:1;}
+.room-v2-stage .room-window:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:#fff;opacity:.9}.room-v2-stage .room-window:after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:#fff;opacity:.9}.room-v2-stage .room-window span{position:relative;z-index:2;}
+.room-frame{position:absolute;top:22px;width:44px;height:34px;border-radius:12px;background:#fffaf0;border:2px solid #efcf9a;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#b87d3d;box-shadow:0 5px 12px rgba(141,91,40,.1);z-index:1;}
+.frame-left{left:18px}.frame-right{left:70px}
+.room-shelf{position:absolute;right:18px;top:86px;width:76px;height:12px;border-radius:8px;background:#bb8451;box-shadow:0 8px 0 #d9a56f,0 12px 18px rgba(103,64,32,.18);z-index:1;}
+.room-shelf span{position:absolute;right:5px;top:-17px;font-size:9px;color:#9b6b39;font-weight:900;}
+.cloud-a{left:128px!important;top:20px!important;z-index:1;}
+.room-furniture{position:absolute;z-index:3;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 8px 8px rgba(104,68,34,.18));transition:transform .22s ease,opacity .22s ease,filter .22s ease;animation:itemPop .45s ease both;line-height:1;}
+.room-furniture.unlocked:hover{transform:translateY(-2px) scale(1.04);}
+.room-furniture.locked{opacity:.35;filter:grayscale(1) drop-shadow(0 5px 6px rgba(0,0,0,.08));font-size:18px!important;}
+.lock-mark{background:rgba(255,255,255,.78);border:1px dashed #b9b9b9;border-radius:12px;padding:5px;}
+.room-plant{right:24px;bottom:80px;font-size:38px;}
+.room-missionPlant{left:19px;bottom:70px;font-size:30px;}
+.room-sofa{left:58px;bottom:66px;font-size:56px;z-index:2;}
+.room-cushion{left:94px;bottom:43px;font-size:28px;}
+.room-chat{left:32px;bottom:43px;font-size:27px;}
+.room-ramen{right:38px;top:79px;font-size:30px;z-index:4;}
+.room-lamp{left:22px;bottom:96px;font-size:35px;}
+.room-photo{left:50%;top:22px;transform:translateX(-50%);font-size:35px;z-index:2;}
+.room-mat{left:50%;bottom:20px;transform:translateX(-50%);font-size:42px;z-index:2;}
+.room-dumbbell{right:34px;bottom:34px;font-size:31px;}
+.room-pointStar{right:104px;top:17px;font-size:25px;animation:twinkle 1.8s ease-in-out infinite;}
+.room-crown{display:none;}
+.room-panda-v2{position:absolute;left:50%;bottom:50px;transform:translateX(-50%);width:88px;min-height:92px;display:flex;align-items:center;justify-content:center;z-index:5;filter:drop-shadow(0 10px 12px rgba(90,60,33,.18));animation:roomPanda 3.2s ease-in-out infinite;}
+.room-panda-v2.pose-sleepy{left:56%;bottom:52px;animation:floaty 4s ease-in-out infinite;}
+.room-panda-label{position:absolute;left:50%;bottom:-13px;transform:translateX(-50%);white-space:nowrap;font-size:9px;font-weight:900;color:#5f917f;background:rgba(255,255,255,.9);border:1px solid #d8eee7;border-radius:999px;padding:3px 7px;box-shadow:0 4px 10px rgba(0,0,0,.06);}
+.room-crown-on-panda{position:absolute;top:-9px;left:50%;transform:translateX(-50%) rotate(-8deg);font-size:24px;z-index:8;animation:twinkle 2s ease-in-out infinite;}
+@keyframes twinkle{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.16);opacity:1}}
+@media (max-width:430px){.room-v2-stage{height:240px}.room-sofa{font-size:49px;left:48px}.room-panda-v2{bottom:48px}.room-plant{right:18px}.room-shelf{right:12px}.room-ramen{right:31px}.room-photo{font-size:30px}.room-mat{font-size:36px}.room-dumbbell{right:27px}}
+
+
+/* タイムカプセル */
+.time-capsule-card{background:linear-gradient(135deg,#fff9f0,#f2fff9);border:1.5px solid rgba(230,170,75,.22);position:relative;overflow:visible}
+.tc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+.tc-sub{font-size:11px;color:#9a8170;font-weight:800;line-height:1.5}
+.tc-count{background:#fff;border:1px solid #f1dfc6;border-radius:16px;padding:7px 10px;text-align:center;color:#c78a36;font-weight:900;box-shadow:0 3px 10px rgba(170,120,50,.08)}
+.tc-count b{display:block;font-size:15px;color:#9a6426}.tc-count span{display:block;font-size:9px;color:#b8905e}
+.tc-delivery{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#fff2d4,#ffffff);border:1.5px solid #f0d39b;border-radius:18px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(218,158,67,.12);animation:itemPop .45s ease both}
+.tc-delivery.opened{background:#ffffff;border-color:#e5f0ec}.tc-envelope{width:44px;height:44px;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 12px rgba(0,0,0,.06);flex-shrink:0}
+.tc-delivery-title{font-size:13px;color:#9b6425;font-weight:900;margin-bottom:3px}.tc-delivery-text{font-size:11px;color:#8d7665;font-weight:800;line-height:1.5}
+.tc-open-btn{border:none;background:linear-gradient(135deg,#ffb85c,#ff8f70);color:#fff;border-radius:14px;padding:9px 10px;font-size:11px;font-weight:900;font-family:inherit;cursor:pointer;box-shadow:0 5px 14px rgba(245,142,80,.25);white-space:nowrap}
+.tc-waiting{background:#fff;border:1px solid #e8f3ef;border-radius:16px;padding:10px 11px;margin-bottom:10px;font-size:12px;color:#5d8e80;font-weight:900;line-height:1.55}
+.tc-form{background:#fff;border:1px solid #eee6dc;border-radius:18px;padding:10px;margin-bottom:10px}.tc-form textarea{width:100%;min-height:82px;resize:vertical;border:1.5px solid #eadfce;border-radius:15px;padding:11px 12px;font-size:12px;line-height:1.6;color:#3d514b;font-family:inherit;outline:none;background:#fffdf8}.tc-form textarea:focus{border-color:#f0bd72;box-shadow:0 0 0 3px rgba(240,189,114,.13)}
+.tc-row{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}.tc-option{border:1px solid #e8f3ef;background:#f8fffc;border-radius:14px;padding:8px 5px;font-size:10px;font-weight:900;color:#5e8d80;font-family:inherit;cursor:pointer}.tc-option span{display:block;margin-top:3px}.tc-option.sel{background:#fff3d8;border-color:#f1cd82;color:#b87923;box-shadow:0 3px 10px rgba(222,160,60,.12)}
+.tc-photo-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:9px}.tc-photo-btn,.tc-remove-btn{border:none;border-radius:13px;padding:8px 10px;font-size:11px;font-weight:900;font-family:inherit;cursor:pointer}.tc-photo-btn{background:#e9fbf4;color:#3da888}.tc-remove-btn{background:#f8eeee;color:#c66}.tc-open-date{font-size:10px;color:#9bb8b0;font-weight:800;margin-left:auto}.tc-photo-preview{display:block;width:100%;max-height:160px;object-fit:cover;border-radius:16px;margin-top:9px;border:1px solid #efe4d3}.tc-error{font-size:11px;color:#d66;font-weight:800;margin-top:7px}.tc-save-btn{width:100%;border:none;background:linear-gradient(135deg,#5DCBA8,#3da888);color:white;border-radius:16px;padding:11px 12px;font-size:12px;font-weight:900;font-family:inherit;cursor:pointer;box-shadow:0 5px 14px rgba(77,184,158,.23);margin-top:9px}
+.tc-list{background:#f8fffc;border:1px solid #e4efeb;border-radius:16px;padding:10px}.tc-list-title{font-size:11px;color:#7aada0;font-weight:900;margin-bottom:7px}.tc-sealed-item{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border:1px solid #edf5f2;border-radius:13px;padding:8px 9px;margin-top:6px;font-size:10px;color:#7aada0;font-weight:900}.tc-sealed-item b{color:#31574e}.tc-empty{font-size:11px;color:#9bb8b0;font-weight:800}.tc-modal-back{position:fixed;inset:0;background:rgba(20,40,34,.36);z-index:999;display:flex;align-items:center;justify-content:center;padding:18px}.tc-modal{width:min(330px,92vw);max-height:84vh;overflow:auto;background:linear-gradient(180deg,#fffdf8,#ffffff);border-radius:28px;padding:20px 18px;box-shadow:0 20px 60px rgba(0,0,0,.28);text-align:center;border:2px solid #fff}.tc-modal-envelope{font-size:42px;margin-bottom:5px}.tc-modal-title{font-size:16px;color:#1a5044;font-weight:900;margin-bottom:4px}.tc-modal-date{font-size:11px;color:#9bb8b0;font-weight:800;margin-bottom:10px}.tc-modal-photo{width:100%;max-height:180px;object-fit:cover;border-radius:18px;margin-bottom:11px;border:1px solid #eee}.tc-modal-message{background:#fff8e8;border:1px solid #f0dfbd;border-radius:18px;padding:13px;text-align:left;font-size:13px;line-height:1.75;color:#4a3a20;font-weight:800;white-space:pre-wrap}.tc-modal-panda{margin-top:10px;background:#f0fff8;border:1px solid #d8eee7;border-radius:16px;padding:10px;font-size:12px;color:#3da888;font-weight:900;line-height:1.6}
+.room-timecapsule{left:118px;bottom:85px;font-size:31px;z-index:4}
+@media(max-width:430px){.tc-row{grid-template-columns:repeat(2,1fr)}.tc-delivery{align-items:flex-start;flex-wrap:wrap}.tc-open-btn{width:100%}.tc-open-date{width:100%;margin-left:0}.room-timecapsule{left:108px;bottom:83px}}
+
+/* ===== Welcome / Landing screen ===== */
+.welcome-screen{position:relative;height:100%;min-height:100%;overflow:hidden;background:linear-gradient(160deg,#fff7dc 0%,#e9fff4 48%,#eaf4ff 100%);padding:22px 16px;display:flex;align-items:center;justify-content:center;}
+.welcome-bg-orb{position:absolute;border-radius:999px;filter:blur(2px);opacity:.55;pointer-events:none;}
+.orb-one{width:180px;height:180px;background:#ffd8a8;top:-58px;right:-70px;}
+.orb-two{width:210px;height:210px;background:#bdf0e2;bottom:-86px;left:-76px;}
+.welcome-hero,.auth-entry-card{position:relative;z-index:1;width:100%;background:rgba(255,255,255,.86);border:1px solid rgba(255,255,255,.8);box-shadow:0 18px 44px rgba(60,120,100,.18);border-radius:30px;padding:24px 18px;text-align:center;}
+.welcome-badge{display:inline-flex;align-items:center;justify-content:center;background:#e9fff5;color:#40aa8f;border:1px solid #bfeede;border-radius:999px;padding:6px 12px;font-size:10px;font-weight:900;letter-spacing:.12em;margin-bottom:14px;}
+.welcome-panda{font-size:72px;line-height:1;margin:2px 0 14px;filter:drop-shadow(0 8px 12px rgba(64,170,143,.16));animation:pandaFloat 2.8s ease-in-out infinite;}
+.auth-panda{font-size:58px;line-height:1;margin:0 0 12px;animation:pandaFloat 2.8s ease-in-out infinite;}
+.welcome-hero h1,.auth-entry-card h1{font-size:25px;line-height:1.28;color:#183d36;font-weight:950;letter-spacing:-.04em;margin:0 0 12px;}
+.welcome-hero p,.auth-entry-card p{font-size:12.5px;line-height:1.8;color:#6c9f91;font-weight:700;margin:0 auto 16px;max-width:270px;}
+.welcome-feature-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:12px 0 18px;}
+.welcome-feature-row span{background:#fff8df;border:1px solid #f5dfaa;color:#a8791f;border-radius:999px;padding:7px 9px;font-size:10.5px;font-weight:850;}
+.welcome-dots{display:flex;justify-content:center;gap:7px;margin:4px 0 16px;}
+.welcome-dots span{width:7px;height:7px;border-radius:99px;background:#d9ebe5;transition:.25s;}
+.welcome-dots span.active{width:24px;background:#4db89e;}
+.welcome-main-btn{width:100%;border:0;border-radius:18px;background:linear-gradient(135deg,#4db89e,#66cdb6);color:white;font-size:14px;font-weight:950;padding:14px 15px;box-shadow:0 12px 24px rgba(77,184,158,.24);}
+.welcome-main-btn:disabled{opacity:.55;box-shadow:none;}
+.welcome-sub-btn{width:100%;border:0;background:transparent;color:#65a797;font-weight:850;font-size:12px;padding:11px 8px;margin-top:6px;}
+.auth-entry-screen{align-items:flex-start;overflow-y:auto;padding-top:20px;}
+.auth-entry-card{text-align:left;}
+.auth-entry-card .welcome-badge,.auth-entry-card .auth-panda,.auth-entry-card h1,.auth-entry-card p{text-align:center;display:flex;justify-content:center;}
+.auth-entry-card p{display:block;}
+.auth-mode-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#eef8f5;border-radius:16px;padding:5px;margin:6px 0 15px;}
+.auth-mode-row button{border:0;background:transparent;color:#76a99c;font-size:12px;font-weight:900;border-radius:12px;padding:9px;}
+.auth-mode-row button.sel{background:white;color:#2f9d84;box-shadow:0 6px 16px rgba(70,150,130,.12);}
+.auth-entry-card .field{margin-bottom:11px;}
+.auth-entry-msg{background:#eafaf5;border:1px solid #c9eee2;color:#3b9b82;border-radius:14px;padding:10px 12px;font-size:11.5px;font-weight:800;line-height:1.55;margin:2px 0 12px;}
+.auth-entry-msg.err{background:#fff1ed;border-color:#ffd1c4;color:#c45b42;}
+@keyframes pandaFloat{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-8px) rotate(1deg)}}
+
+
+/* ===== Welcome food panda landing v4 ===== */
+.welcome-food-screen{padding:0;background:#fff7ef;display:block;overflow:hidden;}
+.welcome-food-hero{position:relative;height:70%;min-height:520px;overflow:hidden;border-bottom-left-radius:34px;border-bottom-right-radius:34px;background:#dff5ff;}
+.welcome-food-hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;}
+.welcome-food-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.02) 48%,rgba(255,255,255,.78) 100%);}
+.welcome-food-copy{position:absolute;top:18px;left:18px;right:18px;text-align:center;color:#3d2b20;text-shadow:0 2px 10px rgba(255,255,255,.8);}
+.welcome-logo-pill{display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.86);border:1px solid rgba(255,255,255,.9);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:950;color:#45a783;box-shadow:0 8px 22px rgba(50,80,70,.12);margin-bottom:9px;}
+.welcome-food-copy h1{font-size:28px;line-height:1.22;font-weight:950;letter-spacing:-.05em;margin:0;color:#4a2d20;}
+.welcome-food-copy h1 span{font-size:43px;color:#f15f82;letter-spacing:-.07em;}
+.welcome-food-copy p{font-size:12px;line-height:1.7;font-weight:900;margin:8px auto 0;max-width:286px;color:#5a4030;background:rgba(255,255,255,.72);border-radius:18px;padding:8px 10px;}
+.welcome-floating-card{position:absolute;z-index:4;background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 10px 26px rgba(80,60,40,.15);padding:9px 10px;width:128px;font-size:18px;display:grid;grid-template-columns:24px 1fr;gap:2px 7px;align-items:center;}
+.welcome-floating-card b{font-size:10.5px;line-height:1.35;color:#4b3b31;font-weight:950;}
+.welcome-floating-card span{grid-column:2;font-size:9.5px;line-height:1.35;color:#79a99b;font-weight:900;}
+.left-card{left:14px;top:250px}.right-card{right:14px;top:328px}
+.welcome-bottom-panel{position:absolute;left:16px;right:16px;bottom:16px;z-index:5;background:linear-gradient(180deg,rgba(255,255,255,.80),rgba(255,255,255,.96));border:1px solid rgba(255,255,255,.92);border-radius:28px;padding:14px 14px 12px;box-shadow:0 -4px 30px rgba(50,70,60,.12);backdrop-filter:blur(8px);}
+.welcome-start-gradient{background:linear-gradient(135deg,#ffa62e 0%,#fb4fa0 58%,#5dcba8 100%);border-radius:24px;font-size:18px;padding:16px 15px;box-shadow:0 14px 26px rgba(235,90,150,.25);}
+.welcome-tutorial-screen{padding:0;background:#fff8ee;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;}
+.tutorial-panda-banner{position:relative;height:46%;min-height:330px;overflow:hidden;border-bottom-left-radius:32px;border-bottom-right-radius:32px;background:#dff5ff;box-shadow:0 12px 32px rgba(50,80,70,.12);}
+.tutorial-panda-banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;}
+.tutorial-panda-banner:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.78));}
+.tutorial-banner-copy{position:absolute;left:20px;right:20px;bottom:18px;z-index:1;text-align:center;}
+.tutorial-banner-copy span{display:inline-flex;background:#fff;border:1px solid #f5e5d0;color:#4db89e;border-radius:999px;padding:5px 11px;font-size:10px;font-weight:950;letter-spacing:.08em;margin-bottom:7px;}
+.tutorial-banner-copy h1{font-size:24px;line-height:1.2;color:#3f2b22;font-weight:950;margin:0 0 6px;text-shadow:0 2px 8px rgba(255,255,255,.9);}
+.tutorial-banner-copy p{font-size:11.5px;line-height:1.55;color:#5f4a3d;font-weight:850;background:rgba(255,255,255,.75);border-radius:16px;padding:7px 10px;margin:0 auto;max-width:290px;}
+.tutorial-card{width:calc(100% - 28px);margin:-8px auto 0;background:rgba(255,255,255,.95);border:1px solid #fff;border-radius:28px;padding:16px 16px 14px;text-align:center;box-shadow:0 16px 38px rgba(60,100,85,.14);position:relative;z-index:2;}
+.tutorial-icon{width:58px;height:58px;margin:0 auto 8px;border-radius:20px;background:#effcf7;display:flex;align-items:center;justify-content:center;font-size:30px;border:1px solid #d9f1e8;}
+.tutorial-card h2{font-size:21px;color:#193f36;font-weight:950;margin:0 0 6px;}
+.tutorial-card p{font-size:12px;line-height:1.7;color:#6d9c91;font-weight:850;margin:0 auto 11px;max-width:280px;}
+.welcome-auth-food{padding:0 14px 18px;background:#fff7ef;display:block;overflow:auto;}
+.auth-food-visual{position:relative;height:300px;margin:0 -14px 0;overflow:hidden;border-bottom-left-radius:30px;border-bottom-right-radius:30px;background:#dff5ff;}
+.auth-food-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;}
+.auth-food-visual:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.72));}
+.auth-food-copy{position:absolute;left:20px;right:20px;bottom:16px;z-index:1;background:rgba(255,255,255,.84);border:1px solid #fff;border-radius:20px;padding:11px 13px;text-align:center;box-shadow:0 8px 22px rgba(70,70,60,.12);}
+.auth-food-copy b{display:block;font-size:17px;color:#3f2b22;font-weight:950;margin-bottom:3px;}.auth-food-copy span{display:block;font-size:11px;color:#69a797;font-weight:900;}
+.welcome-auth-food .auth-entry-card{margin-top:-10px;position:relative;z-index:2;border-radius:26px;padding:18px 16px;}
+@media(max-height:760px){.welcome-food-hero{height:64%;min-height:470px}.welcome-food-copy h1{font-size:25px}.welcome-food-copy h1 span{font-size:37px}.left-card{top:220px}.right-card{top:295px}.auth-food-visual{height:250px}.tutorial-panda-banner{height:42%;min-height:285px}.tutorial-card{padding-top:13px}.tutorial-icon{width:48px;height:48px;font-size:26px}}
+
+/* === Welcome UI cleanup v6: keep the panda image readable, no overlapping labels === */
+.welcome-food-screen{
+  background:#fff7ef;
+  display:flex !important;
+  flex-direction:column;
+  overflow:auto !important;
+}
+.welcome-food-hero{
+  height:64vh !important;
+  min-height:500px !important;
+  max-height:660px;
+  border-bottom-left-radius:32px;
+  border-bottom-right-radius:32px;
+}
+.welcome-food-hero img{
+  object-fit:cover !important;
+  object-position:center top !important;
+}
+.welcome-food-shade{
+  background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 65%,rgba(255,247,239,.86) 100%) !important;
+}
+/* The source image already contains the main copy/cards, so hide duplicate overlays. */
+.welcome-food-copy,
+.welcome-floating-card{
+  display:none !important;
+}
+.welcome-bottom-panel{
+  position:relative !important;
+  left:auto !important;
+  right:auto !important;
+  bottom:auto !important;
+  margin:-34px 14px 18px !important;
+  z-index:10 !important;
+  background:rgba(255,255,255,.96) !important;
+  border:1px solid rgba(255,255,255,.95) !important;
+  border-radius:30px !important;
+  padding:16px 14px 14px !important;
+  box-shadow:0 18px 44px rgba(80,60,40,.16) !important;
+}
+.welcome-start-gradient{
+  min-height:58px;
+  font-size:18px !important;
+}
+.welcome-tutorial-screen{
+  overflow:auto !important;
+  background:#fff8ee !important;
+}
+.tutorial-panda-banner{
+  height:46vh !important;
+  min-height:330px !important;
+  max-height:470px !important;
+}
+.tutorial-panda-banner img{
+  object-fit:cover !important;
+  object-position:center top !important;
+}
+/* Tutorial text is already repeated in the card below; avoid covering the panda face. */
+.tutorial-banner-copy{
+  display:none !important;
+}
+.tutorial-panda-banner:after{
+  background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 70%,rgba(255,248,238,.88) 100%) !important;
+}
+.tutorial-card{
+  margin:-18px auto 16px !important;
+  padding:18px 16px 15px !important;
+}
+.welcome-auth-food{
+  overflow:auto !important;
+}
+.auth-food-visual{
+  height:42vh !important;
+  min-height:300px !important;
+  max-height:440px !important;
+}
+.auth-food-visual img{
+  object-fit:cover !important;
+  object-position:center top !important;
+}
+.auth-food-copy{
+  display:none !important;
+}
+.welcome-auth-food .auth-entry-card{
+  margin-top:-24px !important;
+  box-shadow:0 18px 44px rgba(80,60,40,.14) !important;
+}
+@media(max-height:760px){
+  .welcome-food-hero{height:60vh !important;min-height:430px !important;}
+  .tutorial-panda-banner{height:40vh !important;min-height:270px !important;}
+  .auth-food-visual{height:35vh !important;min-height:250px !important;}
+}
+@media(max-width:380px){
+  .welcome-food-hero{min-height:450px !important;}
+  .welcome-start-gradient{font-size:16px !important;}
+}
+
+
+/* === Welcome panda image visibility fix v7 === */
+.welcome-food-hero,
+.tutorial-panda-banner,
+.auth-food-visual{
+  background-image:url("welcome_panda_food.png"), url("images/welcome_panda_food.png") !important;
+  background-size:cover !important;
+  background-position:center top !important;
+  background-repeat:no-repeat !important;
+}
+.welcome-food-hero img,
+.tutorial-panda-banner img,
+.auth-food-visual img{
+  display:block !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  z-index:0 !important;
+}
+.welcome-food-shade,
+.tutorial-panda-banner:after,
+.auth-food-visual:after{
+  pointer-events:none !important;
+}
+
+
+/* === Welcome food panda artwork v9: safe layout, no left text clipping === */
+.yg8-image-wrap{
+  height:68% !important;
+  min-height:520px !important;
+  max-height:720px !important;
+  background:#fff7ef url("./welcome_panda_food.png") center top/cover no-repeat !important;
+}
+.yg8-main-img{
+  object-fit:cover !important;
+  object-position:center top !important;
+}
+.yg8-tutorial-img-wrap,.yg8-auth-visual{
+  background:#fff7ef url("./welcome_panda_food.png") center top/cover no-repeat !important;
+}
+.yg8-tutorial-img,.yg8-auth-visual img{
+  object-fit:cover !important;
+  object-position:center top !important;
+}
+.yg8-panel{
+  margin-top:-28px !important;
+}
+@media(max-height:760px){
+  .yg8-image-wrap{height:62% !important;min-height:455px !important;}
+}
+@media(max-width:380px){
+  .yg8-image-wrap{min-height:470px !important;}
+}
+
+
+/* === Welcome v11: show full welcome artwork without cutting left/right text === */
+.yg8-image-wrap{
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  overflow:visible !important;
+  background:#fff7ef !important;
+  border-bottom-left-radius:26px !important;
+  border-bottom-right-radius:26px !important;
+}
+.yg8-main-img{
+  width:100% !important;
+  height:auto !important;
+  max-height:none !important;
+  object-fit:contain !important;
+  object-position:center top !important;
+  display:block !important;
+}
+.yg8-tutorial-img-wrap,
+.yg8-auth-visual{
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  overflow:visible !important;
+  background:#fff7ef !important;
+}
+.yg8-tutorial-img,
+.yg8-auth-visual img{
+  width:100% !important;
+  height:auto !important;
+  max-height:none !important;
+  object-fit:contain !important;
+  object-position:center top !important;
+  display:block !important;
+}
+.yg8-panel{
+  margin-top:12px !important;
+}
+@media(max-height:760px){
+  .yg8-image-wrap{height:auto !important;min-height:0 !important;}
+  .yg8-tutorial-img-wrap{height:auto !important;min-height:0 !important;}
+  .yg8-auth-visual{height:auto !important;min-height:0 !important;}
+}
+@media(max-width:380px){
+  .yg8-image-wrap{min-height:0 !important;}
+}
