@@ -21,6 +21,9 @@ html,body{min-height:100vh;background:linear-gradient(135deg,#a8ddd4 0%,#c4ece4 
 body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;-webkit-font-smoothing:antialiased;}
 
 #root{display:flex;flex-direction:column;align-items:center;padding:30px 20px 60px;gap:0;}
+/* 【新規追加】実機（スマホ）表示のときは#rootの余白をなくして画面いっぱいに表示する */
+#root:has(.real-device){padding:0;}
+body.is-real-device #root{padding:0;} /* :has()非対応の古い端末向けの保険 */
 .page-title{font-size:15px;font-weight:700;color:rgba(255,255,255,0.9);margin-bottom:24px;letter-spacing:1px;text-shadow:0 1px 4px rgba(0,0,0,0.15);}
 .devices-row{display:flex;gap:40px;align-items:flex-start;justify-content:center;flex-wrap:wrap;}
 .device-col{display:flex;flex-direction:column;align-items:center;gap:12px;}
@@ -49,6 +52,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI"
 .android-camera{width:12px;height:12px;border-radius:50%;background:#1c1c1e;position:absolute;top:10px;left:50%;transform:translateX(-50%);}
 .android-navbar{position:absolute;bottom:0;left:0;right:0;height:28px;background:rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;gap:40px;z-index:150;}
 .android-nav-btn{font-size:18px;opacity:0.5;}
+
+/* ── 実機表示（新規追加） ──
+   スマホ実機（Android/iOS）でアクセスした場合に適用。
+   PCのプレビュー表示には一切影響しません（.real-deviceの中だけに効くため）。
+   フェイクの端末枠（影・角丸・ノッチ・カメラ・ナビバー装飾）を外し、
+   実際の画面サイズいっぱいにアプリを表示します。 */
+.real-device{width:100%;display:flex;justify-content:center;}
+.real-device .frame-ios,
+.real-device .frame-android{
+  width:100%;max-width:520px;
+  height:100dvh; /* 実機のアドレスバー高さ変動に追従する単位 */
+  border-radius:0;
+  box-shadow:none;
+}
+.real-device .ios-island,
+.real-device .android-camera,
+.real-device .android-navbar{display:none;} /* フェイクのノッチ・カメラ・ナビボタンは実機では非表示 */
+.real-device .ios-statusbar{height:env(safe-area-inset-top,0px);padding:0;}
+.real-device .android-statusbar{height:env(safe-area-inset-top,0px);padding:0;}
+.real-device .frame-android .nav{bottom:0;height:80px;} /* フェイクナビバー分のズレを解消 */
 
 /* ── 共通スクリーン ── */
 .screen{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:82px;}
@@ -2525,6 +2548,11 @@ function AppLogic({devId}){
   const [authNotice,setAuthNotice]=useState('');
   // 【新規追加】新規登録直後、確認メールの返信待ちであることを示す状態（メールアドレスを保持）
   const [awaitingConfirmationEmail,setAwaitingConfirmationEmail]=useState(null);
+  // 【修正】認証処理の二重実行防止ガード。
+  // authLoading(state)は画面表示用、authBusyRef(ref)は「連打の瞬間」の即時ガード用。
+  // stateの更新は非同期なので、連打されるとstateだけでは防げないケースがあるため。
+  // ※必ず他のフックと同じ場所（早期returnより前）で宣言すること（Reactのルール）
+  const authBusyRef=useRef(false);
   const [tab,setTab]=useState('home');
   const [showRep,setShowRep]=useState(false);
   const [postAfter,setPostAfter]=useState(false);
@@ -2571,82 +2599,136 @@ function AppLogic({devId}){
   // ・メール/パスワードの入力チェックを追加（validateAuthInputで一括チェック）
   // ・呼び出し元(画面側)が「成功したかどうか」を判定できるよう、結果オブジェクトを返すようにした
   //   → これにより「Supabaseで認証成功した場合のみホーム画面へ進む」を画面側で保証できる
+  // 【修正】ログイン処理。
+  // ・try / catch / finally 構造に変更 → 例外が発生してもローディングが必ず解除される
+  // ・authBusyRefで二重実行を防止
   const handleLogin=async(email,pass)=>{
+    if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
     setAuthNotice('');
     const validationError=validateAuthInput(email,pass);
     if(validationError){setAuthError(validationError);return{success:false};}
     if(!supabaseClient){setAuthError('Supabaseの読み込みに失敗しました');return{success:false};}
-    setAuthLoading(true);
-    const {data,error}=await supabaseClient.auth.signInWithPassword({email:email.trim(),password:pass});
-    setAuthLoading(false);
-    if(error){setAuthError('ログインできませんでした。メール・パスワードを確認してね');return{success:false};}
-    return{success:true,session:data.session};
+    try{
+      authBusyRef.current=true;
+      setAuthLoading(true);
+      const {data,error}=await supabaseClient.auth.signInWithPassword({email:email.trim(),password:pass});
+      if(error)throw error;
+      return{success:true,session:data.session};
+    }catch(error){
+      setAuthError('ログインできませんでした。メール・パスワードを確認してね');
+      return{success:false};
+    }finally{
+      authBusyRef.current=false;
+      setAuthLoading(false); // 成功でも失敗でも例外でも、必ずローディング解除
+    }
   };
 
   // 【修正】新規登録処理。
-  // ・入力チェックを追加
-  // ・登録直後にすぐ先へ進めるのではなく、「確認メールが必要かどうか」を呼び出し元へ返す
-  //   → 確認が必要な場合は画面側で「確認メール送信画面」を表示し、Homeへは進めない
+  // ・try / catch / finally 構造に変更 → 例外が発生しても「確認中…」のまま残らない
+  // ・authBusyRefで二重実行（登録ボタン連打）を防止
+  // ・成功して確認メールが必要な場合は awaitingConfirmationEmail をセットし、
+  //   確認メール待ち専用画面（ConfirmEmailScreen）へ切り替える
   const handleRegister=async(email,pass)=>{
+    if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
     setAuthNotice('');
     const validationError=validateAuthInput(email,pass);
     if(validationError){setAuthError(validationError);return{success:false};}
     if(!supabaseClient){setAuthError('Supabaseの読み込みに失敗しました');return{success:false};}
-    setAuthLoading(true);
-    const {data,error}=await supabaseClient.auth.signUp({email:email.trim(),password:pass});
-    setAuthLoading(false);
-    if(error){
-      setAuthError(error.message&&error.message.includes('already')?'すでに登録済みのメールかも。ログインを試してね':'新規登録できませんでした：'+error.message);
+    try{
+      authBusyRef.current=true;
+      setAuthLoading(true);
+      // emailRedirectTo: 確認メール内のリンクを押した後に戻ってくるURL。
+      // 今アプリを開いているURL（Netlify本番URLなど）を自動で指定します。
+      // ※Supabase側の「Redirect URLs」にもこのURLが登録されている必要があります。
+      const {data,error}=await supabaseClient.auth.signUp({
+        email:email.trim(),
+        password:pass,
+        options:{emailRedirectTo:location.origin+location.pathname}
+      });
+      if(error)throw error;
+      // data.session がある＝Supabase側の「メール確認」設定がオフで、すぐ使える状態
+      const needsConfirmation=!data.session;
+      if(needsConfirmation){
+        // 確認メール送信完了 → 確認待ち専用画面へ切り替え（画面切り替えは親のrender側で行う）
+        setAwaitingConfirmationEmail(email.trim());
+      }else{
+        setAuthNotice('新規登録できたよ！このままプロフィール設定に進んでね🐼');
+      }
+      return{success:true,needsConfirmation};
+    }catch(error){
+      const msg=(error&&error.message)||'';
+      setAuthError(msg.includes('already')?'すでに登録済みのメールかも。ログインを試してね':'新規登録できませんでした。時間をおいてもう一度試してね');
       return{success:false};
+    }finally{
+      authBusyRef.current=false;
+      setAuthLoading(false); // 成功でも失敗でも例外でも、必ずローディング解除
     }
-    // data.session がある＝Supabase側の「メール確認」設定がオフで、すぐ使える状態
-    const needsConfirmation=!data.session;
-    if(needsConfirmation){
-      setAwaitingConfirmationEmail(email.trim());
-    }else{
-      setAuthNotice('新規登録できたよ！このままプロフィール設定に進んでね🐼');
-    }
-    return{success:true,needsConfirmation};
   };
 
-  // 【新規追加】確認メールの再送信
+  // 【修正】確認メールの再送信（try/catch/finally化＋連打防止）
   const handleResendConfirmation=async(email)=>{
+    if(authBusyRef.current)return;
     setAuthError('');
     setAuthNotice('');
     if(!supabaseClient||!email)return;
-    setAuthLoading(true);
-    const {error}=await supabaseClient.auth.resend({type:'signup',email});
-    setAuthLoading(false);
-    if(error){setAuthError('再送信に失敗しました。時間をおいて試してね');return;}
-    setAuthNotice('確認メールを再送信したよ🐼');
+    try{
+      authBusyRef.current=true;
+      setAuthLoading(true);
+      const {error}=await supabaseClient.auth.resend({type:'signup',email});
+      if(error)throw error;
+      setAuthNotice('確認メールを再送信したよ🐼');
+    }catch(error){
+      setAuthError('再送信に失敗しました。時間をおいて試してね');
+    }finally{
+      authBusyRef.current=false;
+      setAuthLoading(false);
+    }
   };
 
-  // 【新規追加】パスワード再設定メールの送信（「パスワードを忘れた方はこちら」から呼ばれる）
+  // 【修正】パスワード再設定メールの送信（try/catch/finally化＋連打防止）
   const handlePasswordReset=async(email)=>{
+    if(authBusyRef.current)return{success:false};
     setAuthError('');
     setAuthNotice('');
     const e=String(email||'').trim();
     if(!e){setAuthError('メールアドレスを入力してください');return{success:false};}
     if(!isValidEmail(e)){setAuthError('正しいメールアドレスを入力してください');return{success:false};}
     if(!supabaseClient){setAuthError('Supabaseの読み込みに失敗しました');return{success:false};}
-    setAuthLoading(true);
-    const {error}=await supabaseClient.auth.resetPasswordForEmail(e,{redirectTo:location.href});
-    setAuthLoading(false);
-    if(error){setAuthError('送信に失敗しました。時間をおいて試してね');return{success:false};}
-    setAuthNotice('パスワード再設定メールを送信したよ。メール内のリンクを確認してね🐼');
-    return{success:true};
+    try{
+      authBusyRef.current=true;
+      setAuthLoading(true);
+      const {error}=await supabaseClient.auth.resetPasswordForEmail(e,{redirectTo:location.href});
+      if(error)throw error;
+      setAuthNotice('パスワード再設定メールを送信したよ。メール内のリンクを確認してね🐼');
+      return{success:true};
+    }catch(error){
+      setAuthError('送信に失敗しました。時間をおいて試してね');
+      return{success:false};
+    }finally{
+      authBusyRef.current=false;
+      setAuthLoading(false);
+    }
   };
 
+  // 【修正】Googleログイン（try/catch/finally化）
+  // Supabase側でGoogle Providerが未設定でも、エラーメッセージが出るだけでアプリは壊れない
   const handleGoogleLogin=async()=>{
+    if(authBusyRef.current)return;
     setAuthError('');
-    // Supabase側でGoogle Providerが未設定でも、ここでエラーが返るだけでアプリは壊れない
     if(!supabaseClient){setAuthError('Supabaseの読み込みに失敗しました');return;}
-    setAuthLoading(true);
-    const {error}=await supabaseClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});
-    setAuthLoading(false);
-    if(error)setAuthError('Googleログインの設定確認が必要です');
+    try{
+      authBusyRef.current=true;
+      setAuthLoading(true);
+      const {error}=await supabaseClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});
+      if(error)throw error;
+    }catch(error){
+      setAuthError('Googleログインの設定確認が必要です');
+    }finally{
+      authBusyRef.current=false;
+      setAuthLoading(false);
+    }
   };
 
   const handleLogout=async()=>{
@@ -2657,10 +2739,13 @@ function AppLogic({devId}){
   };
 
   const closeWelcomeGate=()=>{try{sessionStorage.setItem('yurutore_welcome_seen_v13','1');}catch(e){};setShowWelcomeGate(false);};
-  if(showWelcomeGate)return<WelcomeGate onContinue={closeWelcomeGate} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} onNeedConfirmation={setAwaitingConfirmationEmail} authLoading={authLoading} authError={authError} authNotice={authNotice}/>;
 
-  // 【新規追加】メール認証が完了していない場合は、Home/オンボーディングへは進めず、
-  // 「確認メールを送信しました」画面を必ず表示する。
+  // 【重要修正】画面判定の順序を変更しました。
+  // 以前は「WelcomeGate → 確認メール画面」の順で判定していたため、
+  // WelcomeGateから新規登録した場合、確認メール待ち状態になっても
+  // WelcomeGateが表示され続け、「確認中…」のまま止まったように見えるバグがありました。
+  // → 確認メール待ちの判定を"最優先"に移動。どの画面から登録しても必ず
+  //   「確認メールを送信しました」画面へ切り替わります。
   // ・新規登録直後（awaitingConfirmationEmail）
   // ・すでにSupabaseのセッションはあるが、メール未確認（email_confirmed_atが無い）の場合
   //   ※ Googleログインなどメール以外のプロバイダーはメール確認不要のため対象外
@@ -2683,8 +2768,10 @@ function AppLogic({devId}){
     />;
   }
 
+  if(showWelcomeGate)return<WelcomeGate onContinue={closeWelcomeGate} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice}/>;
+
   // 初回ユーザー向け：世界観が伝わるウェルカム画面 → 登録/体験 → 初期設定
-  if(!st.user||!st.onboard)return<RegisterScreen onDone={u=>setSt(s=>({...s,user:u,onboard:true}))} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} onNeedConfirmation={setAwaitingConfirmationEmail} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
+  if(!st.user||!st.onboard)return<RegisterScreen onDone={u=>setSt(s=>({...s,user:u,onboard:true}))} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
   if(praise)return<PraiseScreen praise={praise} state={st} onHome={()=>{setPraise(null);setTab('home');}} onTL={()=>{setSt(s=>({...s,posted:[...(s.posted||[]),praise.reportId]}));setPraise(null);setTab('timeline');showToast('タイムラインに投稿したよ ✨');}}/>;
 
   const submitRep=async({aid,note,photo})=>{
@@ -2767,56 +2854,7 @@ function AppLogic({devId}){
   );
 }
 
-/* ═══════════════ ログイン ═══════════════ */
-function LoginScreen({onLogin,onRegister,onGoogleLogin,loading,error,notice}){
-  const [email,setEmail]=useState('');
-  const [pass,setPass]=useState('');
-  const [mode,setMode]=useState('login');
-  const platform=useContext(DevCtx);
-  const submit=()=>{
-    if(mode==='register')onRegister(email.trim(),pass);
-    else onLogin(email.trim(),pass);
-  };
-  return(
-    <div style={{display:'flex',flexDirection:'column',height:'100%',overflowY:'auto'}}>
-      <div className="login-hero">
-        <div className="ai-banner">
-          <div className="ai-inner">
-            <strong>今日もおつかれさま！</strong>
-            <span>ゆるっと続けるあなたが いちばんすごいよ〜！💗</span>
-          </div>
-        </div>
-        <Ring pct={75}/>
-      </div>
-      <div className="login-form fade-up">
-        <div style={{textAlign:'center',marginBottom:22}}>
-          <div style={{fontSize:24,fontWeight:800,color:'#1a4038',letterSpacing:0.5}}>ゆるトレ倶楽部</div>
-          <div style={{fontSize:12,color:'#7aada0',marginTop:4,lineHeight:1.55}}>{mode==='register'?'まずはメールとパスワードで新規登録しよう。':'食べながらでもいいし、ゆるく、楽しく続けよう。'}</div>
-        </div>
-        {error&&<div style={{fontSize:12,color:'#d66',background:'#fff3f3',border:'1px solid #ffd6d6',borderRadius:12,padding:'9px 12px',marginBottom:12,lineHeight:1.5}}>{error}</div>}
-        {notice&&<div style={{fontSize:12,color:'#2f8f76',background:'#effaf6',border:'1px solid #ccefe3',borderRadius:12,padding:'9px 12px',marginBottom:12,lineHeight:1.5}}>{notice}</div>}
-        <label className="lbl">メールアドレス</label>
-        <input className="field" style={{marginBottom:10}} placeholder="example@mail.com" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email"/>
-        <label className="lbl">パスワード</label>
-        <input className="field" style={{marginBottom:20}} type="password" placeholder="6文字以上" value={pass} onChange={e=>setPass(e.target.value)} autoComplete={mode==='register'?'new-password':'current-password'} onKeyDown={e=>{if(e.key==='Enter')submit();}}/>
-        <button className="btn btn-primary" disabled={loading} onClick={submit}>{loading?'処理中…':mode==='register'?'新規登録する':'ログイン'}</button>
-        {mode==='register'&&<div style={{fontSize:11,color:'#90a8a0',lineHeight:1.6,marginTop:10,textAlign:'center'}}>登録後、Supabase設定によっては確認メールが届くよ。</div>}
-        <div style={{display:'flex',alignItems:'center',gap:8,margin:'13px 0'}}>
-          <div style={{flex:1,height:1,background:'#dceee8'}}/><span style={{fontSize:11,color:'#b0c8c0'}}>または</span>
-          <div style={{flex:1,height:1,background:'#dceee8'}}/>
-        </div>
-        <button className="btn btn-outline" disabled={loading} onClick={()=>onGoogleLogin()}><span style={{marginRight:6}}>G</span>Googleでログイン</button>
-        <div style={{textAlign:'center',marginTop:16,fontSize:13,color:'#7aada0'}}>
-          {mode==='login'?'アカウントをお持ちでない方 → ':'登録済みの方 → '}
-          <button disabled={loading} onClick={()=>setMode(mode==='login'?'register':'login')} style={{color:'#4DB89E',fontWeight:700,background:'none',border:'none',cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>{mode==='login'?'新規登録画面へ':'ログイン画面へ'}</button>
-        </div>
-        <div style={{textAlign:'center',marginTop:14,fontSize:11,color:'#90a8a0',lineHeight:1.7,background:'#f0faf8',borderRadius:platform==='android'?8:12,padding:'10px 14px'}}>
-          完璧じゃなくていい。<br/>ピザ食べた日でも、また戻っておいで。
-        </div>
-      </div>
-    </div>
-  );
-}
+/* 【削除】未使用だった古いLoginScreenコンポーネントを削除しました（どこからも呼ばれていない死にコードでした） */
 
 /* ═══════════════ 新規登録 ═══════════════ */
 
@@ -2849,7 +2887,7 @@ function ConfirmEmailScreen({email,loading,error,notice,onResend,onBackToLogin})
   );
 }
 
-function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPassword,onNeedConfirmation,authLoading,authError,authNotice}){
+function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPassword,authLoading,authError,authNotice}){
   const [step,setStep]=useState(0);
   const [mode,setMode]=useState('register');
   const [email,setEmail]=useState('');
@@ -4493,7 +4531,63 @@ function AndroidDevice(){
   );
 }
 
+/* ═══════════════ OS判定（新規追加） ═══════════════ */
+// 【修正内容】アクセスしている端末のOSを判定し、該当する画面だけを表示します。
+// ・画面幅では判定しません（OS判定とレスポンシブ対応は別物のため）
+// ・iPadOSはMacのようなuserAgentを名乗ることがあるため、
+//   「MacIntel かつ タッチ対応」の場合もiOSとして判定します
+const getDeviceOS=()=>{
+  const userAgent=navigator.userAgent||'';
+  const platform=navigator.platform||'';
+
+  // Android判定
+  if(/android/i.test(userAgent)){
+    return 'android';
+  }
+
+  // iOS判定（iPhone / iPad / iPod ＋ デスクトップ表示モードのiPad対策）
+  const isIOS=
+    /iPad|iPhone|iPod/.test(userAgent)||
+    (platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isIOS){
+    return 'ios';
+  }
+
+  // それ以外（Windows / Mac / Linux等のパソコン）
+  return 'desktop';
+};
+
 function Root(){
+  // 【修正内容】OS判定は初回レンダー時に1回だけ行う（途中で変わることはないため）
+  const [deviceOS]=useState(getDeviceOS);
+
+  // 実機（スマホ）のときはbodyに目印クラスを付け、CSS側で余白を消す
+  useEffect(()=>{
+    if(deviceOS==='android'||deviceOS==='ios'){
+      document.body.classList.add('is-real-device');
+    }
+    return()=>document.body.classList.remove('is-real-device');
+  },[deviceOS]);
+
+  // ── Android端末：Android専用画面だけを表示（iPhone画面は描画しない） ──
+  if(deviceOS==='android'){
+    return(
+      <div className="real-device">
+        <AndroidDevice/>
+      </div>
+    );
+  }
+
+  // ── iOS端末（iPhone/iPad/iPod）：iOS専用画面だけを表示（Android画面は描画しない） ──
+  if(deviceOS==='ios'){
+    return(
+      <div className="real-device">
+        <IOSDevice/>
+      </div>
+    );
+  }
+
+  // ── パソコン（Windows/Mac等）：従来どおりのデバイスプレビュー表示（既存デザイン維持） ──
   return(
     <div>
       <div className="page-title">ゆるトレ倶楽部 — デバイスプレビュー</div>
