@@ -1,0 +1,12 @@
+# 【v44】Netlify 用のキャッシュ設定
+# 画面本体(index.html)が古いまま残ると「直したのに直っていない」ように見えるため、
+# HTML と app.js / style.css は毎回サーバーに確認してから使う。
+# 画像などの assets は今までどおり長期キャッシュしてよい（表示は速いまま）。
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/images/*
+  Cache-Control: public, max-age=31536000, immutable

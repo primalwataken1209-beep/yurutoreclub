@@ -1034,3 +1034,58 @@ label.lbl{font-size:12px;font-weight:700;color:#4a8878;margin-bottom:5px;display
 .room-debug{display:block;margin:8px 10px 0;background:rgba(20,16,12,.82);color:#fff;
   font:10px/1.6 ui-monospace,Menlo,Consolas,monospace;padding:7px 10px;border-radius:8px;
   white-space:pre-wrap;word-break:break-all;}
+
+/* === 【v46】ウェルカム画面: 画像内キャッチコピーとの重複回避用 視覚非表示クラス === */
+/* 【v46】画像内にキャッチコピーがあるため、見出しは視覚的に非表示（読み上げ用に残す） */
+.yg8-sr-only{
+  position:absolute!important;
+  width:1px!important;
+  height:1px!important;
+  margin:-1px!important;
+  padding:0!important;
+  border:0!important;
+  overflow:hidden!important;
+  clip:rect(0 0 0 0)!important;
+  clip-path:inset(50%)!important;
+  white-space:nowrap!important;
+}
+
+/* ═══════════ 【v46.3】オンボーディング3画面のパンジロー画像（追記のみ・既存ルールは未変更） ═══════════
+   ・画像は3枚とも 700x500 の同一キャンバスなので、同じサイズ・同じタッチで並ぶ
+   ・既存 .welcome-panda の pandaFloat は8度回転するため、画像のときだけ回転なしのフロートに差し替える */
+.welcome-panda-photo{animation:panjiroFloat 3.2s ease-in-out infinite;}
+@keyframes panjiroFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.welcome-panda-img{display:block;width:auto;height:128px;max-width:100%;margin:0 auto;object-fit:contain;}
+@media(max-height:700px){.welcome-panda-img{height:100px;}}
+
+/* ═══════════════ 【v47新規追加】ポーズ切替のフェード ═══════════════
+   §10の指示どおり、派手な演出は入れない。
+   ・0.2秒の弱いフェード＋わずかなスケール(0.985→1)だけ
+   ・回転・強いズーム・バウンド・点滅・パーティクルは一切使わない
+   ・「演出を見せる」のではなく、気づいたら別のことをしている、を狙う
+   位置・サイズは JS の PJ47_POSES が持つ(既存 .room-panda42-img の
+   object-fit:contain / object-position:center bottom をそのまま使うので
+   縦横比は崩れず、足元も上下に跳ねない)。 */
+.room-panda47-img{animation:pj47Swap .2s ease-out 1;}
+/* ═══════════════ 【v48新規追加】言語切替 ═══════════════
+   既存デザインは変更していない。主張しすぎない小さな行を足しただけ。
+   英語は日本語より文字が長くなるので、はみ出さないよう折り返しと最小サイズだけ面倒を見る。 */
+.lang-switch{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:10px;flex-wrap:wrap;}
+.lang-switch button{border:0;background:transparent;font-family:inherit;font-size:11px;font-weight:800;
+  color:#a9bdb6;padding:4px 9px;border-radius:999px;cursor:pointer;line-height:1.4;}
+.lang-switch button.on{color:#3aa88c;background:#eafff6;}
+.lang-switch .lang-sep{color:#d8e6e0;font-size:11px;}
+.lang-switch.compact{margin-top:0;gap:2px;}
+.lang-switch.compact button{padding:3px 7px;font-size:10.5px;}
+/* 英語表示のとき、文字数が増えるボタン・ナビだけを保険で調整する(レイアウトは変えない) */
+html[lang="en"] .nav-btn span:last-child{font-size:9.5px;letter-spacing:-.01em;}
+html[lang="en"] .yg8-primary,html[lang="en"] .yg8-secondary,html[lang="en"] .yg8-linkbtn,
+html[lang="en"] .welcome-main-btn,html[lang="en"] .welcome-sub-btn,
+html[lang="en"] .btn,html[lang="en"] .pj-btn{word-break:normal;overflow-wrap:anywhere;}
+html[lang="en"] .welcome-feature-row span{font-size:10px;}
+html[lang="en"] .home-cta-title{letter-spacing:-.01em;}
+
+@keyframes pj47Swap{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){
+  .room-panda47-img{animation:none;}
+}
