@@ -1909,6 +1909,20 @@ html[lang="en"] .home-cta-title{letter-spacing:-.01em;}
   .pj-line,.pj-msg-card{animation:none!important}
 }
 
+/* 【v51.2新規追加】SNS投稿写真（1投稿1枚）。既存カードの余白・角丸に合わせる */
+.sns-post-photo-wrap{margin:6px 0 10px;border-radius:14px;overflow:hidden;background:#f3faf7;
+  border:1px solid #e3f1ec;display:flex;align-items:center;justify-content:center}
+.sns-post-photo-wrap.loading{height:120px}
+.sns-post-photo{display:block;max-width:100%;max-height:360px;width:auto;height:auto;object-fit:contain}
+.sns-compose-photo{display:flex;align-items:center;gap:9px;margin:8px 0 2px;flex-wrap:wrap}
+.sns-compose-photo-btn{border:1.5px dashed #cfeee2;background:#f6fffb;color:#4DB89E;border-radius:999px;
+  padding:6px 12px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit}
+.sns-compose-thumb-wrap{position:relative;width:64px;height:64px;flex-shrink:0}
+.sns-compose-thumb{width:64px;height:64px;object-fit:cover;border-radius:12px;border:1px solid #e2f2ec;display:block}
+.sns-compose-thumb-x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:none;
+  background:rgba(20,40,36,0.72);color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer}
+.pj-photo-note{position:relative;font-size:11px;color:#6a9d90;font-weight:800;text-align:center;margin:12px 0 -4px}
+
 </style>
 </head>
 <body>
@@ -2065,7 +2079,15 @@ ja:{
     needText:'ひとことか運動の種類を選んでね🐼', needComment:'コメントを入力してね🐼', noSelfFollow:'自分はフォローできないよ🐼',
     friend:'ゆるトレ仲間', guestOnly:'体験版だから、いまは自分の記録だけに残したよ🐼',
     reactions:'ゆるリアクション', commentsBtn:'💬 応援コメント',
-    postedTL:'タイムラインに投稿したよ ✨'},
+    postedTL:'タイムラインに投稿したよ ✨',
+    /* 【v51.2】SNS投稿写真 */
+    photoAdd:'📷 写真をえらぶ', photoChange:'選び直す', photoRemove:'写真を外す',
+    photoPreparing:'写真を準備中…🐼', photoAlt:'投稿の写真',
+    photoTypeErr:'jpg / png / webp の写真を選んでね🐼',
+    photoTooBig:'写真が大きすぎるみたい。別の写真を選んでね🐼',
+    photoLoadErr:'写真を読み込めなかったよ。別の写真で試してね🐼',
+    photoUploadErr:'写真を送れなかったみたい。投稿はまだされていないよ🐼',
+    alreadyPosted:'この記録はもう投稿ずみだよ🐼', photoWillShare:'📷 写真も一緒に投稿されるよ'},
   week:{
     past7:'過去7日間', past1y:'過去1年', monthRecords:'{y}年{m}月の記録',
     movedDays:'{n}日動いた / よくやった種目：{top}', showAll:'この月の記録をすべて見る（{n}件）',
@@ -2240,6 +2262,7 @@ ja:{
     photo:'写真（任意）', photoHint:'ジム・散歩道・ラーメンも思い出に残せるよ',
     photoAdd:'写真を追加', photoChange:'写真を変更', photoLoading:'写真を小さくして保存準備中…🐼',
     photoCaption:'この写真が記録と思い出アルバムに残るよ',
+    photoCaptionPost:'この写真は記録に残り、タイムラインにも投稿されるよ',   /* 【v51.2】 */
     note:'ひとことメモ（任意）', notePh:'「今日もよく動いた！」など気軽に',
     submit:'報告する ✓', submitPost:'記録して投稿する ✨'
   },
@@ -2340,7 +2363,15 @@ en:{
     needText:'Add a few words or pick an activity 🐼', needComment:'Write a comment first 🐼', noSelfFollow:"You can't follow yourself 🐼",
     friend:'Yurutore friend', guestOnly:'You are in trial mode, so this stayed in your own logs 🐼',
     reactions:'Gentle reactions', commentsBtn:'💬 Comments',
-    postedTL:'Shared to the timeline ✨'},
+    postedTL:'Shared to the timeline ✨',
+    /* v51.2: photos in posts */
+    photoAdd:'📷 Add a photo', photoChange:'Change', photoRemove:'Remove photo',
+    photoPreparing:'Getting your photo ready… 🐼', photoAlt:'Photo in post',
+    photoTypeErr:'Please pick a jpg, png or webp photo 🐼',
+    photoTooBig:'That photo is too big. Try another one 🐼',
+    photoLoadErr:"Couldn't load that photo. Try another one 🐼",
+    photoUploadErr:"Couldn't send the photo, so nothing was posted yet 🐼",
+    alreadyPosted:'This log has already been shared 🐼', photoWillShare:'📷 Your photo will be shared too'},
   week:{
     past7:'Last 7 days', past1y:'Last 12 months', monthRecords:'Logs from {m} {y}',
     movedDays:'{n} days moved / most often: {top}', showAll:'See all {n} logs this month',
@@ -2514,6 +2545,7 @@ en:{
     photo:'Photo (optional)', photoHint:'The gym, a walking path, even ramen can be a memory',
     photoAdd:'Add a photo', photoChange:'Change photo', photoLoading:'Shrinking your photo… 🐼',
     photoCaption:'This photo stays in your log and memory album',
+    photoCaptionPost:'This photo stays in your log and is also shared on the timeline',   /* v51.2 */
     note:'A quick note (optional)', notePh:'Something like "moved a lot today!"',
     submit:'Log it ✓', submitPost:'Log and share ✨'
   },
@@ -4379,6 +4411,17 @@ async function saveSt(devId,userId,s){
   syncStateToSupabase(userId,s);
 }
 
+/* 【v51.2新規追加】運動記録・タイムカプセルの写真の中身(dataURL)は端末の中だけに置く。
+   状態の控え(user_progress)には「写真あり」の目印(縦横サイズ)だけを送る。
+   端末内の保存データ(localStorage)は一切変更しない。 */
+function ytStripLocalPhotos(s){
+  try{
+    const mark=p=>(p&&typeof p==='object')?{w:p.w||null,h:p.h||null,localOnly:true}:p;
+    const strip=(list)=>Array.isArray(list)?list.map(x=>(x&&x.photo)?{...x,photo:mark(x.photo)}:x):list;
+    return {...s,reports:strip(s.reports),timeCapsules:strip(s.timeCapsules)};
+  }catch(e){return null;}
+}
+
 // 【新規追加】認証済みユーザーの運動記録などをSupabaseへ保存する関数（将来の移行用）。
 // Supabase側で以下のテーブルを作成すると有効になります（README参照）。
 //   create table user_progress (
@@ -4390,9 +4433,11 @@ async function syncStateToSupabase(userId,s){
   try{
     if(!supabaseClient)return;
     if(!userId||userId==='guest')return; // 体験版（未ログイン）は同期しない
+    const safe=ytStripLocalPhotos(s);   // 【v51.2】写真の中身は送らない
+    if(!safe)return;
     await supabaseClient.from('user_progress').upsert({
       user_id:userId,
-      data:s,
+      data:safe,
       updated_at:new Date().toISOString()
     });
   }catch(e){
@@ -4583,6 +4628,161 @@ const SNS_PAGE_SIZE=30;              // タイムライン1ページの件数
 const SNS_POST_MAX=300;              // 投稿本文の上限(DBのCHECKと同じ)
 const SNS_COMMENT_MAX=200;           // コメントの上限(DBのCHECKと同じ)
 
+/* ═══════════════ 【v51.2新規追加】SNS投稿写真（1投稿につき最大1枚） ═══════════════
+   ・保存先は Supabase Storage の private バケット「post-images」
+     パスは {自分のuser_id}/{ランダムuuid}.jpg。DBの posts.image_path にはこのパスだけを保存する
+     （公開URLは保存しない。表示のたびに期限付きの署名URLを発行する）
+   ・誰が見られるかは Storage の RLS が決める（本人／公開アカウントの削除されていない投稿のみ）
+   ・画像はブラウザで長辺1600px以下のJPEGに作り直してから送る
+     （作り直すので、位置情報などの撮影データ(EXIF)は送られない）
+   ・運動記録の写真は「タイムラインに投稿する」を押したときだけ送る。記録しただけでは送らない
+   ・migration 未適用の環境では image_path 列が無いので、従来の列だけで読み直す */
+const SNS_POST_COLS='id,user_id,body,activity_type,created_at';
+const SNS_POST_COLS_IMG=SNS_POST_COLS+',image_path';
+let   SNS_HAS_IMAGE_COL=true;
+const SNS_IMG_BUCKET='post-images';
+const SNS_IMG_TYPES=['image/jpeg','image/png','image/webp'];   // SVG・GIF・HEIC等は受け付けない
+const SNS_IMG_ACCEPT=SNS_IMG_TYPES.join(',');
+const SNS_IMG_MAX_INPUT=20*1024*1024;   // 選べる元画像の上限（20MB）
+const SNS_IMG_MAX_PIXELS=60000000;      // 元画像の画素数の上限（6000万画素）
+const SNS_IMG_MAX_EDGE=1600;            // 送る画像の長辺
+const SNS_IMG_TARGET_BYTES=1500000;     // これを超えたら画質を下げて作り直す
+const SNS_IMG_MAX_UPLOAD=3*1024*1024;   // 送る画像の上限（バケットの上限と同じ3MB）
+const SNS_IMG_URL_TTL=3600;             // 署名URLの有効期間（秒）
+const SNS_IMG_PATH_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/;
+const SNS_IMG_URLS={};                  // path -> {url, exp}（メモリ上だけ。保存キーは増やさない）
+/* 同じ運動記録の二重投稿防止（メモリ上だけ。送信中／送信済み） */
+const SNS_REPORT_POSTING=new Set();
+const SNS_REPORT_POSTED=new Set();
+
+function snsIsMissingImageCol(e){
+  const code=String((e&&e.code)||''); const msg=String((e&&e.message)||'');
+  return code==='42703'||code==='PGRST204'||/image_path/i.test(msg);
+}
+/* build(cols) は select(cols) を含むクエリを返す関数。image_path 列が無い環境では従来の列で読み直す */
+async function snsSelectPosts(build){
+  if(SNS_HAS_IMAGE_COL){
+    const r=await build(SNS_POST_COLS_IMG);
+    if(!r.error||!snsIsMissingImageCol(r.error))return r;
+    SNS_HAS_IMAGE_COL=false;
+    try{ console.warn('[sns] posts.image_path がまだ無いため、写真なしで表示します'); }catch(_){}
+  }
+  return await build(SNS_POST_COLS);
+}
+function snsIsOwnImagePath(uid,path){
+  return !!(uid&&typeof path==='string'&&SNS_IMG_PATH_RE.test(path)&&path.indexOf(uid+'/')===0);
+}
+function snsSafeImgUrl(u){
+  return typeof u==='string'&&u.indexOf(SUPABASE_URL+'/storage/v1/')===0;
+}
+function snsRandomId(){
+  try{ if(window.crypto&&crypto.randomUUID)return crypto.randomUUID(); }catch(e){}
+  const a=new Uint8Array(16); crypto.getRandomValues(a);
+  a[6]=(a[6]&0x0f)|0x40; a[8]=(a[8]&0x3f)|0x80;
+  const h=Array.from(a,x=>x.toString(16).padStart(2,'0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+/* ファイル先頭のバイトで本当に jpg / png / webp かを確かめる（拡張子のすり替え対策） */
+function snsSniffImage(file){
+  return new Promise(resolve=>{
+    try{
+      const r=new FileReader();
+      r.onload=()=>{
+        const b=new Uint8Array(r.result||new ArrayBuffer(0));
+        const at=(i,str)=>str.split('').every((c,k)=>b[i+k]===c.charCodeAt(0));
+        if(b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)return resolve('image/jpeg');
+        if(b[0]===0x89&&at(1,'PNG'))return resolve('image/png');
+        if(at(0,'RIFF')&&at(8,'WEBP'))return resolve('image/webp');
+        resolve(null);
+      };
+      r.onerror=()=>resolve(null);
+      r.readAsArrayBuffer(file.slice(0,16));
+    }catch(e){resolve(null);}
+  });
+}
+/* 画像を長辺1600px以下のJPEGに作り直す。src は blob: か data: のURL */
+function snsEncodeImage(src){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        if(!w||!h){reject(new Error(t('sns.photoLoadErr')));return;}
+        if(w*h>SNS_IMG_MAX_PIXELS){reject(new Error(t('sns.photoTooBig')));return;}
+        const k=Math.min(1,SNS_IMG_MAX_EDGE/Math.max(w,h));
+        const cw=Math.max(1,Math.round(w*k)), ch=Math.max(1,Math.round(h*k));
+        const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+        const ctx=c.getContext('2d');
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,cw,ch);   // 透過PNGの背景を白にする
+        ctx.drawImage(img,0,0,cw,ch);
+        const tryQ=(qs)=>{
+          c.toBlob(b=>{
+            if(!b){reject(new Error(t('sns.photoLoadErr')));return;}
+            if(b.size>SNS_IMG_TARGET_BYTES&&qs.length>1){tryQ(qs.slice(1));return;}
+            if(b.size>SNS_IMG_MAX_UPLOAD){reject(new Error(t('sns.photoTooBig')));return;}
+            resolve({blob:b,w:cw,h:ch});
+          },'image/jpeg',qs[0]);
+        };
+        tryQ([0.85,0.75,0.65]);
+      }catch(e){reject(new Error(t('sns.photoLoadErr')));}
+    };
+    img.onerror=()=>reject(new Error(t('sns.photoLoadErr')));
+    img.src=src;
+  });
+}
+/* タイムラインで選んだファイル → 送信用の画像 */
+async function snsPrepareImageFromFile(file){
+  if(!file)throw new Error(t('sns.photoLoadErr'));
+  if(!SNS_IMG_TYPES.includes(String(file.type||'').toLowerCase()))throw new Error(t('sns.photoTypeErr'));
+  if(!file.size||file.size>SNS_IMG_MAX_INPUT)throw new Error(t('sns.photoTooBig'));
+  const real=await snsSniffImage(file);
+  if(!real||!SNS_IMG_TYPES.includes(real))throw new Error(t('sns.photoTypeErr'));
+  const src=URL.createObjectURL(file);
+  try{
+    const out=await snsEncodeImage(src);
+    return {...out,previewUrl:URL.createObjectURL(out.blob)};
+  }finally{ try{URL.revokeObjectURL(src);}catch(e){} }
+}
+/* 運動記録に保存済みの写真(dataURL) → 送信用の画像 */
+async function snsPrepareImageFromDataUrl(dataUrl){
+  if(typeof dataUrl!=='string'||!/^data:image\/(jpeg|png|webp);base64,/i.test(dataUrl))throw new Error(t('sns.photoTypeErr'));
+  return await snsEncodeImage(dataUrl);
+}
+async function snsUploadPostImage(uid,blob){
+  if(!blob||blob.type!=='image/jpeg'||blob.size>SNS_IMG_MAX_UPLOAD)throw new Error('invalid image');
+  const path=`${uid}/${snsRandomId()}.jpg`;
+  const {error}=await supabaseClient.storage.from(SNS_IMG_BUCKET)
+    .upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'3600'});
+  if(error)throw error;
+  return path;
+}
+/* 自分の画像だけを消す。失敗しても呼び出し元の処理は止めない（戻り値で分かる） */
+async function snsRemovePostImage(uid,path){
+  if(!supabaseClient||!snsIsOwnImagePath(uid,path))return false;
+  try{
+    const {error}=await supabaseClient.storage.from(SNS_IMG_BUCKET).remove([path]);
+    if(error)throw error;
+    delete SNS_IMG_URLS[path];
+    return true;
+  }catch(e){ try{console.warn('[sns] image remove',e);}catch(_){} return false; }
+}
+/* まとめて署名URLを発行してメモリに置く（見る権限の無い画像はURLが発行されない） */
+async function snsSignImagePaths(paths){
+  if(!supabaseClient)return;
+  const now=Date.now();
+  const need=[...new Set((paths||[]).filter(p=>SNS_IMG_PATH_RE.test(p||'')))]
+    .filter(p=>!(SNS_IMG_URLS[p]&&SNS_IMG_URLS[p].exp>now+60000));
+  if(!need.length)return;
+  try{
+    const {data,error}=await supabaseClient.storage.from(SNS_IMG_BUCKET).createSignedUrls(need,SNS_IMG_URL_TTL);
+    if(error)throw error;
+    (data||[]).forEach(d=>{
+      if(d&&!d.error&&d.path&&snsSafeImgUrl(d.signedUrl))
+        SNS_IMG_URLS[d.path]={url:d.signedUrl,exp:now+SNS_IMG_URL_TTL*1000};
+    });
+  }catch(e){ try{console.warn('[sns] image url',e);}catch(_){} }
+}
+
 /* Supabaseのエラーを、ユーザーに見せる短い日本語へ変換する。
    原因の詳細はコンソールにだけ出す(画面には出さない)。 */
 function snsErrMsg(e,fallback){
@@ -4685,13 +4885,16 @@ async function snsFetchTimeline(uid,mode){
       userIds=(f.data||[]).map(r=>r.following_id).filter(id=>!snsIsBlockedId(id)); // 【v50】ブロック中は除く
       if(!userIds.length)return snsOk({posts:[],profiles:{},empty:'following'});
     }
-    let q=supabaseClient.from('posts')
-      .select('id,user_id,body,activity_type,created_at')
-      .eq('is_deleted',false)
-      .order('created_at',{ascending:false})
-      .limit(SNS_PAGE_SIZE);
-    if(userIds)q=q.in('user_id',userIds);
-    const {data:posts,error}=await q;
+    /* 【v51.2】image_path も読む（列が無い環境では従来の列だけで読み直す） */
+    const {data:posts,error}=await snsSelectPosts(cols=>{
+      let q=supabaseClient.from('posts')
+        .select(cols)
+        .eq('is_deleted',false)
+        .order('created_at',{ascending:false})
+        .limit(SNS_PAGE_SIZE);
+      if(userIds)q=q.in('user_id',userIds);
+      return q;
+    });
     if(error)throw error;
     /* 【v50】ブロック中のユーザーの投稿は表示しない（自分の画面からだけ消える） */
     const list=(posts||[]).filter(p=>!snsIsBlockedId(p.user_id));
@@ -4709,7 +4912,9 @@ async function snsFetchPostExtras(uid,list){
   const [pf,rx,cm]=await Promise.all([
     supabaseClient.from('profiles').select('id,nickname,avatar_url,region').in('id',authorIds),
     supabaseClient.from('post_reactions').select('post_id,user_id,reaction_type').in('post_id',ids),
-    supabaseClient.from('comments').select('post_id').in('post_id',ids).eq('is_deleted',false)
+    supabaseClient.from('comments').select('post_id').in('post_id',ids).eq('is_deleted',false),
+    /* 【v51.2】写真つき投稿の署名URLを1回でまとめて発行（失敗しても投稿は表示する） */
+    snsSignImagePaths(list.map(p=>p.image_path).filter(Boolean))
   ]);
   const profiles={};
   (pf.data||[]).forEach(r=>{profiles[r.id]=r;});
@@ -4728,10 +4933,11 @@ async function snsFetchPostExtras(uid,list){
 async function snsFetchUserPosts(uid,targetId){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
-    const {data,error}=await supabaseClient.from('posts')
-      .select('id,user_id,body,activity_type,created_at')
+    /* 【v51.2】image_path も読む（列が無い環境では従来の列だけで読み直す） */
+    const {data,error}=await snsSelectPosts(cols=>supabaseClient.from('posts')
+      .select(cols)
       .eq('user_id',targetId).eq('is_deleted',false)
-      .order('created_at',{ascending:false}).limit(SNS_PAGE_SIZE);
+      .order('created_at',{ascending:false}).limit(SNS_PAGE_SIZE));
     if(error)throw error;
     const list=data||[];
     if(!list.length)return snsOk({posts:[],profiles:{},reactions:{},commentCounts:{}});
@@ -4743,29 +4949,51 @@ async function snsFetchUserPosts(uid,targetId){
 /* ── 投稿 ───────────────────────────────────────────────────────────────
    user_id はクライアントから渡すが、RLSの with check (user_id = auth.uid())
    により、他人になりすました投稿はサーバー側で必ず弾かれる。 */
-async function snsCreatePost(uid,{body,activityType},user){
+async function snsCreatePost(uid,{body,activityType,imageBlob},user){
   const g=snsGuard(uid); if(g)return {data:null,error:(g===SNS_NEED_LOGIN?t('sns.needLoginPost'):g)};
   const text=String(body||'').trim().slice(0,SNS_POST_MAX);
   if(!text&&!activityType)return {data:null,error:t('sns.needText')};
   /* 【v50.1新規追加】明白に危険な表現はDBへ送らない（既存のtrim判定はそのまま） */
   if(snsHasDangerPhrase(text))return {data:null,error:t('safety.blocked')};
+  let imagePath=null;   /* 【v51.2】 */
   try{
     await snsEnsureProfile(uid,user);   // プロフィール行が無いと外部キーで失敗するため
+    /* 【v51.2】写真があるときは「写真を送る → 投稿を作る」の順。
+       写真が送れなかったら投稿は作らない（写真なしの不完全な投稿を残さない）。 */
+    if(imageBlob){
+      try{ imagePath=await snsUploadPostImage(uid,imageBlob); }
+      catch(e){
+        try{ console.warn('[sns] image upload',e); }catch(_){}
+        return {data:null,error:t('sns.photoUploadErr')};
+      }
+    }
+    const row={user_id:uid,body:text,activity_type:activityType||null};
+    if(imagePath)row.image_path=imagePath;
     const {data,error}=await supabaseClient.from('posts')
-      .insert({user_id:uid,body:text,activity_type:activityType||null})
-      .select('id,user_id,body,activity_type,created_at').single();
+      .insert(row)
+      .select(imagePath?SNS_POST_COLS_IMG:SNS_POST_COLS).single();
     if(error)throw error;
     return snsOk(data);
-  }catch(e){return snsNg(e,'投稿できなかったみたい🐼');}
+  }catch(e){
+    /* 【v51.2】投稿の保存に失敗したら、先に送った写真を消して置き去りにしない */
+    if(imagePath)await snsRemovePostImage(uid,imagePath);
+    return snsNg(e,'投稿できなかったみたい🐼');
+  }
 }
 
 /* 投稿の削除は物理削除ではなく is_deleted を立てる（ソフトデリート・§14）。 */
-async function snsSoftDeletePost(uid,postId){
+async function snsSoftDeletePost(uid,postId,imagePath){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
+    /* 【v51.2】写真つき投稿は、投稿を非表示(is_deleted)にしたうえで写真ファイルも消す。
+       投稿の復元機能は無いため、写真だけがサーバーに残り続けないようにする。
+       写真の削除に失敗しても、投稿の削除は成立させる（他人からはRLSで見えない）。 */
+    const own=snsIsOwnImagePath(uid,imagePath);
+    const patch=own?{is_deleted:true,image_path:null}:{is_deleted:true};
     const {error}=await supabaseClient.from('posts')
-      .update({is_deleted:true}).eq('id',postId).eq('user_id',uid);
+      .update(patch).eq('id',postId).eq('user_id',uid);
     if(error)throw error;
+    if(own)await snsRemovePostImage(uid,imagePath);
     return snsOk(true);
   }catch(e){return snsNg(e,'削除できなかったみたい🐼');}
 }
@@ -5309,6 +5537,7 @@ function AppLogic({devId}){
   const [tab,setTab]=useState('home');
   const [showRep,setShowRep]=useState(false);
   const [postAfter,setPostAfter]=useState(false);
+  const [snsRefresh,setSnsRefresh]=useState(0);   // 【v51.2】記録から投稿した後にタイムラインを読み直す合図
   const [praise,setPraise]=useState(null);
   const [aiLoad,setAiLoad]=useState(false);
   const [toast,setToast]=useState(null);
@@ -5389,7 +5618,7 @@ function AppLogic({devId}){
 
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
 
-  const showToast=m=>{setToast(m);setTimeout(()=>setToast(null),1900)};
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(cur=>cur===m?null:cur),1900)};   /* 【v51.2】別のトーストは消さない */
 
   /* 【v43新規追加】運動記録を1件、SNSの実投稿として送る。
      本文はメモ（無ければ運動名）。失敗しても運動記録そのものは必ず残る。
@@ -5410,12 +5639,30 @@ function AppLogic({devId}){
       showToast(t('safety.tooFastPost'));
       return false;
     }
-    const act=ACTS.find(a=>a.id===report.aid);
-    const body=(report.note&&report.note.trim())||snsAutoPostBody(act);   /* 【v50.2】日英対応 */
-    const r=await snsCreatePost(uid,{body,activityType:report.aid},st.user);
-    if(r.error){showToast(r.error);return false;}
-    snsMarkSent('post');   /* 【v50.2】成功したときだけ記録する（失敗では待たせない） */
-    return true;
+    /* 【v51.2】同じ記録の二重投稿を防ぐ（送信中は無視、送信済みは案内だけ） */
+    const rkey=report.id?uid+':'+report.id:null;
+    if(rkey&&SNS_REPORT_POSTED.has(rkey)){showToast(t('sns.alreadyPosted'));return false;}
+    if(rkey&&SNS_REPORT_POSTING.has(rkey))return false;
+    if(rkey)SNS_REPORT_POSTING.add(rkey);
+    try{
+      const act=ACTS.find(a=>a.id===report.aid);
+      const body=(report.note&&report.note.trim())||snsAutoPostBody(act);   /* 【v50.2】日英対応 */
+      /* 【v51.2】記録に写真があれば、ここで初めてSNS用に作り直して送る。
+         記録しただけの写真は端末の中から出ない。 */
+      let imageBlob=null;
+      if(report.photo&&report.photo.dataUrl){
+        try{ imageBlob=(await snsPrepareImageFromDataUrl(report.photo.dataUrl)).blob; }
+        catch(e){ showToast(t('sns.photoUploadErr')); return false; }
+      }
+      const r=await snsCreatePost(uid,{body,activityType:report.aid,imageBlob},st.user);
+      if(r.error){showToast(r.error);return false;}
+      snsMarkSent('post');   /* 【v50.2】成功したときだけ記録する（失敗では待たせない） */
+      if(rkey)SNS_REPORT_POSTED.add(rkey);
+      setSnsRefresh(Date.now());   /* 【v51.2】タイムラインに今の投稿を出す */
+      return true;
+    }finally{
+      if(rkey)SNS_REPORT_POSTING.delete(rkey);
+    }
   };
 
   // 【修正】ログイン処理。
@@ -5686,7 +5933,7 @@ function AppLogic({devId}){
      プロフィールがそろうまでは読み込み表示にする。上の useEffect が
      セッションからプロフィールを用意し次第、自動でホームへ進む。 */
   if(isSignedIn&&!hasProfile)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
-  if(praise)return<PraiseScreen praise={praise} state={st} onHome={()=>{setPraise(null);setTab('home');}} onTL={()=>{const rep=(st.reports||[]).find(r=>r.id===praise.reportId);setSt(s=>({...s,posted:[...(s.posted||[]),praise.reportId]}));setPraise(null);setTab('timeline');publishToSns(rep);}} onRoom={()=>{setPraise(null);setTab('home');setRoomJump(Date.now());}}/>;
+  if(praise)return<PraiseScreen praise={praise} state={st} onHome={()=>{setPraise(null);setTab('home');}} onTL={()=>{const rep=(st.reports||[]).find(r=>r.id===praise.reportId);setSt(s=>({...s,posted:[...(s.posted||[]),praise.reportId]}));setPraise(null);setTab('timeline');/* 【v51.2】保存済みの記録をそのまま投稿し、結果を知らせる */if(rep&&rep.photo&&st.auth&&st.auth!=='guest')showToast(t('sns.posting'));publishToSns(rep).then(ok=>{if(ok)showToast(t('sns.postedTL'));});}} onRoom={()=>{setPraise(null);setTab('home');setRoomJump(Date.now());}}/>;
 
   const submitRep=async({aid,note,photo})=>{
     const ts=Date.now();
@@ -5723,6 +5970,7 @@ function AppLogic({devId}){
     trackEvent('exercise_recorded'); // 【v28新規追加】計測(失敗しても体験に影響なし)
     setShowRep(false);setPostAfter(false);setAiLoad(true);
     if(willPost){setTab('timeline');}else{setTab('home');}
+    if(willPost&&photo&&st.auth&&st.auth!=='guest')showToast(t('sns.posting'));   /* 【v51.2】写真の送信には数秒かかるため */
     const msg=await genPraise({aid,streak,ds,note});
     setAiLoad(false);
     if(newReward.rank!==oldReward.rank || streak===7 || streak===30 || streak===100){
@@ -5761,7 +6009,7 @@ function AppLogic({devId}){
     <>
       <div className={`screen ${platform==='android'?'android':''}`}>
         {tab==='home'    &&<HomeScreen     state={st} setState={setSt} streak={streak} pct={pct} aiLoad={aiLoad} onOpenReport={()=>setShowRep(true)} openRoomSignal={roomJump} onRoomOpened={()=>setRoomJump(0)}/>}
-        {tab==='timeline'&&<TimelineScreen state={st} setState={setSt} showToast={showToast}
+        {tab==='timeline'&&<TimelineScreen state={st} setState={setSt} showToast={showToast} refreshSignal={snsRefresh}
             onOpenReport={(post)=>{setPostAfter(!!post);setShowRep(true);}}
             onOpenUser={(id)=>setSnsUser(id)}/>}
         {tab==='weekly'  &&<WeeklyScreen   state={st} streak={streak} pct={pct}/>}
@@ -10063,7 +10311,7 @@ function ReportSheet({onClose,onSubmit,postMode}){
           <div className="photo-preview-wrap">
             <img src={photo.dataUrl} className="photo-preview" alt={t('alt.pickedPhoto')}/>
             <button type="button" className="photo-remove" onClick={()=>setPhoto(null)}>×</button>
-            <div className="photo-caption">{t('report.photoCaption')}</div>
+            <div className="photo-caption">{postMode?t('report.photoCaptionPost'):t('report.photoCaption')}</div>
           </div>
         )}
       </div>
@@ -10163,6 +10411,10 @@ function PraiseScreen({praise,state,onHome,onTL,onRoom}){
                 </div>
               )}
             </div>
+            {/* 【v51.2】写真つきの記録なら、投稿すると写真も共有されることを伝える */}
+            {!!(((state&&state.reports)||[]).find(r=>r.id===praise.reportId)||{}).photo&&(
+              <div className="pj-photo-note">{t('sns.photoWillShare')}</div>
+            )}
             <div className="pj-btns">
               <button className="pj-btn ghost" onClick={e=>{e.stopPropagation();onTL();}}>{t('reaction.postTL').split('\n').map((x,i)=><React.Fragment key={i}>{i>0&&<br/>}{x}</React.Fragment>)}</button>
               <button className="pj-btn main" onClick={e=>{e.stopPropagation();onHome();}}>{t('reaction.goHome')}</button>
@@ -10402,17 +10654,34 @@ function SnsComposer({state,onPosted,showToast}){
   const [aid,setAid]=useState(null);
   const [busy,setBusy]=useState(false);
   const [err,setErr]=useState('');
+  /* 【v51.2】写真（任意・1枚） */
+  const [photo,setPhoto]=useState(null);          // {blob,previewUrl,w,h}
+  const [photoBusy,setPhotoBusy]=useState(false);
+  const fileRef=useRef(null);
+  const busyRef=useRef(false);                    // 連打の瞬間でも二重送信しない
+  useEffect(()=>()=>{ if(photo&&photo.previewUrl){ try{URL.revokeObjectURL(photo.previewUrl);}catch(e){} } },[photo]);
+  const pickPhoto=async(e)=>{
+    const file=e.target.files&&e.target.files[0];
+    if(fileRef.current)fileRef.current.value='';
+    if(!file)return;
+    setErr('');setPhotoBusy(true);
+    try{ setPhoto(await snsPrepareImageFromFile(file)); }
+    catch(ex){ setErr((ex&&ex.message)||t('sns.photoLoadErr')); }
+    finally{ setPhotoBusy(false); }
+  };
   const uid=state&&state.auth;
   const send=async()=>{
-    if(busy)return;
+    if(busy||busyRef.current||photoBusy)return;
     /* 【v50.1新規追加】連投防止。前回の投稿成功から10秒あける */
     if(snsCooldownLeft('post')>0){setErr(t('safety.tooFastPost'));return;}
+    busyRef.current=true;
     setBusy(true);setErr('');
-    const r=await snsCreatePost(uid,{body,activityType:aid},state.user);
+    const r=await snsCreatePost(uid,{body,activityType:aid,imageBlob:photo&&photo.blob},state.user);
+    busyRef.current=false;
     setBusy(false);
     if(r.error){setErr(r.error);return;}
     snsMarkSent('post');   /* 【v50.1】成功したときだけ記録する */
-    setBody('');setAid(null);
+    setBody('');setAid(null);setPhoto(null);
     if(showToast)showToast(t('sns.posted'));
     if(onPosted)onPosted(r.data);
   };
@@ -10434,10 +10703,25 @@ function SnsComposer({state,onPosted,showToast}){
           </button>
         ))}
       </div>
+      {/* 【v51.2】写真（任意・1枚）。選ぶと小さなプレビューが出る */}
+      <div className="sns-compose-photo">
+        <input ref={fileRef} type="file" accept={SNS_IMG_ACCEPT} onChange={pickPhoto} style={{display:'none'}}/>
+        {photo&&(
+          <div className="sns-compose-thumb-wrap">
+            <img src={photo.previewUrl} className="sns-compose-thumb" alt={t('alt.pickedPhoto')}/>
+            <button type="button" className="sns-compose-thumb-x" aria-label={t('sns.photoRemove')}
+              disabled={busy} onClick={()=>setPhoto(null)}>×</button>
+          </div>
+        )}
+        <button type="button" className="sns-compose-photo-btn" disabled={busy||photoBusy}
+          onClick={()=>fileRef.current&&fileRef.current.click()}>
+          {photoBusy?t('sns.photoPreparing'):(photo?t('sns.photoChange'):t('sns.photoAdd'))}
+        </button>
+      </div>
       {err&&<div style={{fontSize:11.5,color:'#c2683f',marginTop:6}}>{err}</div>}
       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10}}>
         <div style={{flex:1,fontSize:10.5,color:'#a0b8b0'}}>{body.length}/{SNS_POST_MAX}</div>
-        <button type="button" onClick={send} disabled={busy}
+        <button type="button" onClick={send} disabled={busy||photoBusy}
           style={{background:busy?'#bcd9cf':'linear-gradient(135deg,#5DCBA8,#3da888)',color:'#fff',border:'none',
                   borderRadius:999,padding:'9px 20px',fontSize:12.5,fontWeight:900,
                   cursor:busy?'default':'pointer',fontFamily:'inherit',
@@ -10449,7 +10733,7 @@ function SnsComposer({state,onPosted,showToast}){
   );
 }
 
-function TimelineScreen({state,setState,showToast,onOpenReport,onOpenUser}){
+function TimelineScreen({state,setState,showToast,onOpenReport,onOpenUser,refreshSignal}){
   const uid=state&&state.auth;
   const [feed,setFeed]=useState('all');
   const [status,setStatus]=useState('loading'); // loading | ready | error | guest
@@ -10472,6 +10756,22 @@ function TimelineScreen({state,setState,showToast,onOpenReport,onOpenUser}){
     });
     return ()=>{alive=false;};
   },[uid,feed,reloadKey]);
+
+  /* 【v51.2】記録から投稿できたら、「読みこみ中」を出さずに静かに読み直す */
+  const seenSignalRef=useRef(refreshSignal);
+  useEffect(()=>{
+    if(refreshSignal===seenSignalRef.current)return;
+    seenSignalRef.current=refreshSignal;
+    if(!uid||uid==='guest')return;
+    let alive=true;
+    snsFetchTimeline(uid,feed).then(r=>{
+      if(!alive||r.error)return;
+      setFeedData({posts:r.data.posts||[],profiles:r.data.profiles||{},
+             reactions:r.data.reactions||{},commentCounts:r.data.commentCounts||{}});
+      setStatus('ready');
+    });
+    return ()=>{alive=false;};
+  },[refreshSignal]);
 
   const reload=()=>setReloadKey(k=>k+1);
   /* 投稿直後は、通信を待たずに先頭へ差し込む（体感を軽くする） */
@@ -10554,6 +10854,40 @@ function TimelineScreen({state,setState,showToast,onOpenReport,onOpenUser}){
   );
 }
 
+/* ═══════════════ 【v51.2新規追加】投稿の写真 ═══════════════
+   署名URLはメモリのキャッシュを使い、無ければ1件だけ発行する。
+   期限切れなどで読めなかったら1回だけURLを取り直し、それでもだめなら非表示にする。 */
+function SnsPostImage({path}){
+  const cached=()=>{ const c=SNS_IMG_URLS[path]; return (c&&c.exp>Date.now())?c.url:null; };
+  const [url,setUrl]=useState(cached);
+  const [failed,setFailed]=useState(false);
+  const retriedRef=useRef(false);
+  const aliveRef=useRef(true);
+  useEffect(()=>{ aliveRef.current=true; return ()=>{aliveRef.current=false;}; },[]);
+  const resolve=()=>{
+    snsSignImagePaths([path]).then(()=>{
+      if(!aliveRef.current)return;
+      const u=cached();
+      if(u)setUrl(u); else setFailed(true);
+    });
+  };
+  useEffect(()=>{ if(!url&&!failed)resolve(); },[path]);
+  if(failed||!SNS_IMG_PATH_RE.test(path||''))return null;
+  if(!url)return <div className="sns-post-photo-wrap loading" aria-hidden="true"/>;
+  return(
+    <div className="sns-post-photo-wrap">
+      <img className="sns-post-photo" src={url} alt={t('sns.photoAlt')} loading="lazy" decoding="async"
+        onError={()=>{
+          if(retriedRef.current){setFailed(true);return;}
+          retriedRef.current=true;
+          delete SNS_IMG_URLS[path];
+          setUrl(null);
+          resolve();
+        }}/>
+    </div>
+  );
+}
+
 /* ═══════════════ 【v43】投稿カード（実データ版） ═══════════════ */
 function SnsPostCard({post,me,state,author,initialReactions,initialCommentCount,onOpenUser,showToast,onDeleted}){
   const act=ACTS.find(x=>x.id===post.activity_type);
@@ -10614,7 +10948,7 @@ function SnsPostCard({post,me,state,author,initialReactions,initialCommentCount,
     if(showToast)showToast(t('sns.cheered'));
   };
   const removePost=async()=>{
-    const r=await snsSoftDeletePost(me,post.id);
+    const r=await snsSoftDeletePost(me,post.id,post.image_path);   /* 【v51.2】写真も削除 */
     if(r.error){setErr(r.error);return;}
     if(showToast)showToast(t('sns.deleted'));
     onDeleted&&onDeleted();
@@ -10657,6 +10991,8 @@ function SnsPostCard({post,me,state,author,initialReactions,initialCommentCount,
       </div>
 
       {post.body&&<div className="post-body">{post.body}</div>}
+      {/* 【v51.2】写真つき投稿だけ表示。読めなかったら何も出さない（カードは崩さない） */}
+      {post.image_path&&<SnsPostImage key={post.image_path} path={post.image_path}/>}
 
       <div className="reaction-panel">
         <div className="reaction-title">{t('sns.reactions')} {total>0&&<span>{total}</span>}</div>
