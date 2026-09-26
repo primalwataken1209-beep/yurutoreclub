@@ -4844,6 +4844,64 @@ async function snsEnsureProfile(uid,user,opts){
   }catch(e){return snsNg(e,t('sns.errProfile'));}
 }
 
+/* ═══════════════ 【v51.4新規追加】非公開アカウント対応の取得ヘルパー ═══════════════
+   v51.4 の Supabase では、profiles の行は「自分 or 公開アカウント」しか読めません。
+   ただし、公開ユーザーの投稿に非公開ユーザーがコメントした場合などに
+   名前とアイコンが消えてしまわないよう、DB側に
+
+     public_profiles … id / nickname / avatar_url だけを返すVIEW
+     yt_follow_counts(target) … フォロー数・フォロワー数の「件数だけ」を返す関数
+
+   を用意してあります。どちらもまだ無いDB（migration未適用）では、
+   自動的に v51.3 までと同じ取得方法へ戻るので、アプリだけ先に公開しても壊れません。 */
+let SNS_HAS_PUBLIC_VIEW=true;
+let SNS_HAS_FOLLOW_RPC=true;
+function snsIsMissingRelation(e){
+  const code=String((e&&e.code)||''); const msg=String((e&&e.message)||'');
+  return code==='42P01'||code==='PGRST205'||/relation .* does not exist|Could not find the table/i.test(msg);
+}
+function snsIsMissingFunction(e){
+  const code=String((e&&e.code)||''); const msg=String((e&&e.message)||'');
+  return code==='42883'||code==='PGRST202'||/Could not find the function|function .* does not exist/i.test(msg);
+}
+/* 表示に必要な最小情報（名前・アイコン）だけを、人数分まとめて取る */
+async function snsFetchPublicProfiles(ids){
+  const out={};
+  const list=[...new Set((ids||[]).filter(Boolean))];
+  if(!list.length||!supabaseClient)return out;
+  if(SNS_HAS_PUBLIC_VIEW){
+    const r=await supabaseClient.from('public_profiles').select('id,nickname,avatar_url').in('id',list);
+    if(!r.error){ (r.data||[]).forEach(x=>{out[x.id]=x;}); return out; }
+    if(!snsIsMissingRelation(r.error)){ try{console.warn('[sns] public_profiles',r.error);}catch(_){} return out; }
+    SNS_HAS_PUBLIC_VIEW=false;
+    try{ console.warn('[sns] public_profiles がまだ無いため profiles から取得します'); }catch(_){}
+  }
+  const r2=await supabaseClient.from('profiles').select('id,nickname,avatar_url').in('id',list);
+  (r2.data||[]).forEach(x=>{out[x.id]=x;});
+  return out;
+}
+/* フォロー数・フォロワー数（件数だけ。誰がフォローしているかは取得しない） */
+async function snsFetchFollowCounts(uid,targetId){
+  if(SNS_HAS_FOLLOW_RPC){
+    try{
+      const {data,error}=await supabaseClient.rpc('yt_follow_counts',{target:targetId});
+      if(error)throw error;
+      const row=Array.isArray(data)?data[0]:data;
+      return {following:(row&&row.following_count)||0, followers:(row&&row.followers_count)||0};
+    }catch(e){
+      if(!snsIsMissingFunction(e)){ try{console.warn('[sns] follow counts',e);}catch(_){} return {following:0,followers:0}; }
+      SNS_HAS_FOLLOW_RPC=false;
+      try{ console.warn('[sns] yt_follow_counts がまだ無いため follows を直接数えます'); }catch(_){}
+    }
+  }
+  const H={count:'exact',head:true};
+  const [fo,fw]=await Promise.all([
+    supabaseClient.from('follows').select('follower_id',H).eq('follower_id',targetId),
+    supabaseClient.from('follows').select('following_id',H).eq('following_id',targetId)
+  ]);
+  return {following:fo.count||0, followers:fw.count||0};
+}
+
 async function snsFetchProfile(uid,targetId){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
@@ -4851,7 +4909,10 @@ async function snsFetchProfile(uid,targetId){
       .select('id,nickname,avatar_url,intro,hitokoto,region,created_at')
       .eq('id',targetId).maybeSingle();
     if(error)throw error;
-    return snsOk(data||null);
+    if(data)return snsOk(data);
+    /* 【v51.4】非公開アカウントの詳細は取得できない。名前とアイコンだけ表示する */
+    const min=await snsFetchPublicProfiles([targetId]);
+    return snsOk(min[targetId]||null);
   }catch(e){return snsNg(e,t('sns.errProfileRead'));}
 }
 
@@ -4860,13 +4921,13 @@ async function snsFetchUserCounts(uid,targetId){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
     const H={count:'exact',head:true};
-    const [p,fo,fw]=await Promise.all([
+    /* 【v51.4】フォロー数は件数だけを返す関数から取る（行そのものは本人しか読めない） */
+    const [p,f]=await Promise.all([
       supabaseClient.from('posts').select('id',H).eq('user_id',targetId).eq('is_deleted',false),
-      supabaseClient.from('follows').select('follower_id',H).eq('follower_id',targetId),
-      supabaseClient.from('follows').select('following_id',H).eq('following_id',targetId)
+      snsFetchFollowCounts(uid,targetId)
     ]);
     if(p.error)throw p.error;
-    return snsOk({posts:p.count||0, following:fo.count||0, followers:fw.count||0});
+    return snsOk({posts:p.count||0, following:f.following, followers:f.followers});
   }catch(e){return snsNg(e,t('sns.errCount'));}
 }
 
@@ -5033,9 +5094,8 @@ async function snsFetchComments(uid,postId){
     const list=(data||[]).filter(c=>!snsIsBlockedId(c.user_id));
     let profiles={};
     if(list.length){
-      const ids=[...new Set(list.map(c=>c.user_id))];
-      const pf=await supabaseClient.from('profiles').select('id,nickname,avatar_url').in('id',ids);
-      (pf.data||[]).forEach(r=>{profiles[r.id]=r;});
+      /* 【v51.4】非公開アカウントの人がコメントしていても名前が消えないようにする */
+      profiles=await snsFetchPublicProfiles(list.map(c=>c.user_id));
     }
     return snsOk({comments:list,profiles});
   }catch(e){return snsNg(e,'コメントを読めなかったみたい🐼');}
@@ -5140,11 +5200,8 @@ async function snsFetchBlockedProfiles(uid){
     if(error)throw error;
     const rows=data||[];
     if(!rows.length)return snsOk({rows:[],profiles:{}});
-    const ids=rows.map(r=>r.blocked_id);
-    const pf=await supabaseClient.from('profiles')
-      .select('id,nickname,avatar_url').in('id',ids);
-    const profiles={};
-    (pf.data||[]).forEach(r=>{profiles[r.id]=r;});
+    /* 【v51.4】ブロックした相手が非公開アカウントでも名前を出せるようにする */
+    const profiles=await snsFetchPublicProfiles(rows.map(r=>r.blocked_id));
     return snsOk({rows,profiles});
   }catch(e){return snsNg(e,t('legal.blockFail'));}
 }
