@@ -2133,7 +2133,7 @@ ja:{
     spam:'メールが届かない場合は、迷惑メールフォルダも確認してみてね🐼'},
   msg:{loading:'読み込み中…',
     emailRequired:'メールアドレスを入力してください', emailInvalid:'正しいメールアドレスを入力してください',
-    passRequired:'パスワードを入力してください', passShort:'パスワードは6文字以上で入力してください',
+    passRequired:'パスワードを入力してください', passShort:'パスワードは8文字以上で入力してください',
     serverFail:'Supabaseの読み込みに失敗しました',
     loginFailed:'ログインできませんでした。メール・パスワードを確認してね',
     signupOk:'新規登録できたよ！このままプロフィール設定に進んでね🐼',
@@ -2220,7 +2220,7 @@ ja:{
     leadGate:'メール登録すると、あとでデータ保存やログイン機能につなげられるよ。',
     leadReg:'メール登録すると、将来データ保存や機種変更にもつなげやすくなるよ。',
     tabRegister:'新規登録', tabLogin:'ログイン',
-    email:'メールアドレス', password:'パスワード', passwordPh:'6文字以上',
+    email:'メールアドレス', password:'パスワード', passwordPh:'8文字以上', passwordPhLogin:'パスワード',
     forgot:'パスワードを忘れた方はこちら',
     submitRegister:'✨無料ではじめる✨', submitLogin:'ログインする',
     google:'Googleでログイン', trial:'メール設定はあとで、体験版で始める', toRegisterScreen:'登録画面へ'
@@ -2417,7 +2417,7 @@ en:{
     spam:"If you don't see it, check your spam or junk folder."},
   msg:{loading:'Loading...',
     emailRequired:'Please enter your email address.', emailInvalid:'Please enter a valid email address.',
-    passRequired:'Please enter your password.', passShort:'Your password needs at least 6 characters.',
+    passRequired:'Please enter your password.', passShort:'Your password needs at least 8 characters.',
     serverFail:"We couldn't reach the server. Please try again.",
     loginFailed:"We couldn't log you in. Please check your email and password.",
     signupOk:"You're all set. Let's set up your profile 🐼",
@@ -2503,7 +2503,7 @@ en:{
     leadGate:'Adding an email lets you save your data and log in later.',
     leadReg:'Adding an email makes it easy to keep your data if you change phones.',
     tabRegister:'Sign up', tabLogin:'Log in',
-    email:'Email', password:'Password', passwordPh:'6 characters or more',
+    email:'Email', password:'Password', passwordPh:'8 characters or more', passwordPhLogin:'Password',
     forgot:'Forgot your password?',
     submitRegister:'✨ Start for free ✨', submitLogin:'Log in',
     google:'Continue with Google', trial:'Skip email, just try it out', toRegisterScreen:'Go to sign up'
@@ -2667,13 +2667,18 @@ function isValidEmail(email){
 
 // メールアドレスとパスワードの入力内容をチェックし、
 // 問題があればエラーメッセージの文字列を返す。問題なければ null を返す。
-function validateAuthInput(email,pass){
+function validateAuthInput(email,pass,mode){
   const e=String(email||'').trim();
   const p=String(pass||'');
   if(!e) return t('msg.emailRequired');
   if(!isValidEmail(e)) return t('msg.emailInvalid');
   if(!p) return t('msg.passRequired');
-  if(p.length<6) return t('msg.passShort');
+  /* 【v51.4.2】8文字以上のチェックは「新規登録」のときだけ行う。
+     ・新規登録 … Supabase本番の Minimum password length = 8 に合わせて、送信前に止める
+     ・ログイン … 文字数では弾かない。6〜7文字のパスワードを使っている既存ユーザーが
+                  今までどおりログインできるようにするため（正否の判定はSupabaseに任せる）
+     mode を渡さずに呼んだ場合は、安全側（8文字以上を必須）として扱う。 */
+  if(mode!=='login' && p.length<8) return t('msg.passShort');
   return null;
 }
 
@@ -5733,7 +5738,7 @@ function AppLogic({devId}){
     if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
     setAuthNotice('');
-    const validationError=validateAuthInput(email,pass);
+    const validationError=validateAuthInput(email,pass,'login');   /* 【v51.4.2】ログインは文字数で弾かない */
     if(validationError){setAuthError(validationError);return{success:false};}
     if(!supabaseClient){setAuthError(t('msg.serverFail'));return{success:false};}
     try{
@@ -5760,7 +5765,7 @@ function AppLogic({devId}){
     if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
     setAuthNotice('');
-    const validationError=validateAuthInput(email,pass);
+    const validationError=validateAuthInput(email,pass,'signup');   /* 【v51.4.2】新規登録は8文字以上 */
     if(validationError){setAuthError(validationError);return{success:false};}
     if(!supabaseClient){setAuthError(t('msg.serverFail'));return{success:false};}
     try{
@@ -6286,7 +6291,7 @@ function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPasswor
         <label className="lbl">{t('auth.email')}</label>
         <input className="field" placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
         <label className="lbl">{t('auth.password')}</label>
-        <input className="field" type="password" placeholder={t('auth.passwordPh')} value={pass} onChange={e=>setPass(e.target.value)}/>
+        <input className="field" type="password" placeholder={t(mode==='login'?'auth.passwordPhLogin':'auth.passwordPh')} value={pass} onChange={e=>setPass(e.target.value)}/>
         {mode==='login'&&<button className="yg8-linkbtn" style={{marginTop:-6,marginBottom:8,alignSelf:'flex-end'}} onClick={()=>{setResetEmail(email);setResetMode(true);}}>{t('auth.forgot')}</button>}
         {/* 【v50新規追加】新規登録のときだけ、13歳以上の確認と規約同意を表示する */}
         {mode==='register'&&<><AgeConfirmRow checked={age13} onChange={v=>{setAge13(v);setLocalError('');}}/><LegalConsentNote/></>}
@@ -6298,7 +6303,8 @@ function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPasswor
           /* 【v50新規追加】13歳未満はアカウントを作成できない。
              ここで止めるだけで、認証処理そのもの（onRegister）は無変更。 */
           if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}
-          const validationError=validateAuthInput(email,pass);
+          /* 【v51.4.2】新規登録のときだけ8文字以上を必須にする（ログインは文字数で弾かない） */
+          const validationError=validateAuthInput(email,pass,mode==='register'?'signup':'login');
           if(validationError){setLocalError(validationError);return;}
           if(mode==='register'&&onRegister){
             const result=await onRegister(email,pass);
@@ -6424,7 +6430,7 @@ function RegisterScreen({onDone,onLogin,onRegister,onGoogleLogin,onResetPassword
         <label className="lbl">{t('auth.email')}</label>
         <input className="field" placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
         <label className="lbl">{t('auth.password')}</label>
-        <input className="field" type="password" placeholder={t('auth.passwordPh')} value={pass} onChange={e=>setPass(e.target.value)}/>
+        <input className="field" type="password" placeholder={t(mode==='login'?'auth.passwordPhLogin':'auth.passwordPh')} value={pass} onChange={e=>setPass(e.target.value)}/>
         {mode==='login'&&<button className="welcome-sub-btn" style={{marginTop:-4,marginBottom:6}} onClick={()=>{setResetEmail(email);setResetMode(true);}}>{t('auth.forgot')}</button>}
         {/* 【v50新規追加】新規登録のときだけ、13歳以上の確認と規約同意を表示する */}
         {mode==='register'&&<><AgeConfirmRow checked={age13} onChange={v=>{setAge13(v);setLocalError('');}}/><LegalConsentNote/></>}
@@ -6435,7 +6441,8 @@ function RegisterScreen({onDone,onLogin,onRegister,onGoogleLogin,onResetPassword
           setLocalNotice('');setLocalError('');
           /* 【v50新規追加】13歳未満はアカウントを作成できない。認証処理そのものは無変更。 */
           if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}
-          const validationError=validateAuthInput(email,pass);
+          /* 【v51.4.2】新規登録のときだけ8文字以上を必須にする（ログインは文字数で弾かない） */
+          const validationError=validateAuthInput(email,pass,mode==='register'?'signup':'login');
           if(validationError){setLocalError(validationError);return;}
           if(mode==='register'&&onRegister){
             const result=await onRegister(email,pass);
