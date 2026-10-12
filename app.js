@@ -178,6 +178,8 @@ ja:{
     mdGift:'🎁 プレゼント', mdShop:'🛒 ショップ',
     minAgo:'{n}分前', hourAgo:'{n}時間前', dayAgo:'{n}日前',
     pfHeadMsg:'今日もおつかれさま！', pfHeadSub:'食べながらでもいいし、ゆるく楽しく続けよう',
+    pfNoRecord:'まだ記録はないけど、今日来てくれた。それだけで十分えらいよ🐼',
+    pfStartedToday:'{name}さん、今日、最初の記録ができたね。それだけで十分えらいよ🐼',
     pfSince:'「{days}日前に始めた{name}さん、今日も来てくれた。それだけで十分えらい。」'},
   confirm:{badge:'STEP 1 完了', title:'確認メールを送信しました',
     to:'{email} 宛に', body:'確認メールを送信しました。メール内のリンクを開いて登録を完了してください。',
@@ -269,8 +271,8 @@ ja:{
     resetLead:'登録したメールアドレスを入力してね。再設定用のリンクを送るよ🐼',
     sendReset:'再設定メールを送る', backToLogin:'← ログインへ戻る',
     title:'一緒にゆるく続けよう',
-    leadGate:'メール登録すると、あとでデータ保存やログイン機能につなげられるよ。',
-    leadReg:'メール登録すると、将来データ保存や機種変更にもつなげやすくなるよ。',
+    leadGate:'メールアドレスで登録・ログインできるよ。登録せずに体験版から始めることもできるよ🐼',
+    leadReg:'メールアドレスで登録・ログインできるよ。まずは体験版から試してもOK🐼',
     tabRegister:'新規登録', tabLogin:'ログイン',
     email:'メールアドレス', password:'パスワード', passwordPh:'8文字以上', passwordPhLogin:'パスワード',
     forgot:'パスワードを忘れた方はこちら',
@@ -462,6 +464,8 @@ en:{
     mdGift:'🎁 Gifts', mdShop:'🛒 Shop',
     minAgo:'{n} min ago', hourAgo:'{n} h ago', dayAgo:'{n} d ago',
     pfHeadMsg:'Good to see you today', pfHeadSub:'Snacks are allowed. Keep it easy and enjoyable',
+    pfNoRecord:'No records yet, but you showed up today. That alone is worth celebrating. 🐼',
+    pfStartedToday:'{name}, you made your first record today. That alone is worth celebrating. 🐼',
     pfSince:'"{name} started {days} days ago, and came back again today. That alone is plenty."'},
   confirm:{badge:'Step 1 done', title:'We sent you a confirmation email.',
     to:'Sent to {email}', body:'Open the link in the email to finish signing up.',
@@ -552,8 +556,8 @@ en:{
     resetLead:"Pop in the email you signed up with and we'll send you a reset link 🐼",
     sendReset:'Send reset email', backToLogin:'← Back to log in',
     title:"Let's keep it easy together",
-    leadGate:'Adding an email lets you save your data and log in later.',
-    leadReg:'Adding an email makes it easy to keep your data if you change phones.',
+    leadGate:'Sign up or log in with your email. You can also try the demo without an account. 🐼',
+    leadReg:'Sign up or log in with your email. Trying the demo first is fine too. 🐼',
     tabRegister:'Sign up', tabLogin:'Log in',
     email:'Email', password:'Password', passwordPh:'8 characters or more', passwordPhLogin:'Password',
     forgot:'Forgot your password?',
@@ -3449,7 +3453,8 @@ function ytClearLocalDataForUser(uid){
     'yurutore_room_seen_unlocks_v1_'+id,
     'yurutore_panda_stats_v1_'+id,
     'yurutore_daily_visit_v1_'+id,
-    'yurutore_room_talklog_v1'     // パンジローとの会話ログ（本人の内容）
+    'yurutore_room_talklog_v1',    // 旧・共通の会話ログ（v51.4.5以降は読み込まない。退会時は従来どおり削除）
+    'yurutore_room_talklog_v1_'+id // 【v51.4.5】退会した本人の会話ログ（ユーザー別キー）
   ];
   keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
   try{ if(window.storage&&window.storage.remove){
@@ -3458,6 +3463,23 @@ function ytClearLocalDataForUser(uid){
   } }catch(e){}
   /* セッション系（ウェルカム画面をもう一度出す） */
   try{ sessionStorage.removeItem('yurutore_welcome_seen_v13'); }catch(e){}
+}
+
+/* 【v51.4.4新規追加】体験版を新しく始めるときだけ、前回の体験版の「部屋の記録」を片付ける。
+   部屋の解放記録(everOk)とパンダ統計(来室回数・会話日数)は 'guest' 共通キーに保存されるため、
+   ログアウト等で体験版の記録(state)が初期化されても残り、新しい体験版の部屋が
+   前回の解放数(例: 16/35 → Lv.6)から始まっていた。
+   ・対象は guest の2キーだけ(ログイン済みユーザーのキーには触れない)
+   ・体験版の記録・ミッション・ポイント等が1件でもあれば何もしない(既存データを守る) */
+function ytResetGuestRoomIfFresh(s){
+  try{
+    const x=s||{};
+    const empty=v=>!v||(Array.isArray(v)?v.length===0:Object.keys(v).length===0);
+    if(!(empty(x.reports)&&empty(x.completedMissions)&&empty(x.missionHistory)&&!(x.pandaPoints>0)&&empty(x.pandaChats)&&empty(x.timeCapsules)))return;
+    localStorage.removeItem(roomUnlockKey('guest'));
+    localStorage.removeItem(pandaStatsKey('guest'));
+    localStorage.removeItem(roomTalkLogKey('guest')); // 【v51.4.5】前回の体験版の会話ログも片付ける
+  }catch(e){}
 }
 
 /* 表示用の小さなヘルパー */
@@ -4038,7 +4060,7 @@ function AppLogic({devId}){
     // ① ウェルカム画面（世界観の紹介 ＋「ログイン・新規登録はこちら」）
     if(showWelcomeGate)return<WelcomeGate onContinue={closeWelcomeGate} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice}/>;
     // ② 登録／ログイン／初期設定
-    if(showAuthFlow)return<RegisterScreen onDone={u=>{setForceAuthScreen(false);setSt(s=>({...s,user:u,onboard:true}));}} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
+    if(showAuthFlow)return<RegisterScreen onDone={u=>{if(!isSignedIn)ytResetGuestRoomIfFresh(st);setForceAuthScreen(false);setSt(s=>({...s,user:u,onboard:true}));}} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
   }
 
   /* 【v43.1】ログインが成立した直後の“ひと呼吸”。
@@ -4769,7 +4791,8 @@ function HomeScreen({state,setState,streak,pct,aiLoad,onOpenReport,openRoomSigna
 
       {/* ④ 今日のひとこと（v26：簡潔版カード。365日データと自動切替処理はそのまま利用） */}
       <div className="card home-daily-simple">
-        <div className="home-daily-label">{t('home.dailyLabel')} <span>{t('home.dailyDay',{n:daily365.day})}</span></div>
+        {/* 【v51.4.4】「365日中○日目」(日英とも)は継続日数と誤解されやすいため表示のみ削除。本文の決定ロジック(daily365Message)は無変更 */}
+        <div className="home-daily-label">{t('home.dailyLabel')}</div>
         <div className="home-daily-text">{daily365.text}</div>
       </div>
 
@@ -5794,9 +5817,13 @@ function trackEvent(ev){
    万一v29表示へ戻したい場合のロールバック用に定数だけ残置。 */
 const ROOM_BG_SRC='room_bg_v29_base.png';
 
-/* レベル計算の統一関数(これ以外の場所でレベルを計算しない) */
+/* レベル計算の統一関数(これ以外の場所でレベルを計算しない)
+   【v51.4.4】n には最初からある基本3点(ラグ・ローテーブル・座布団)が必ず含まれるため、
+   旧判定(n<=2でLv.1)では実績0件の新規ユーザーでも n=3 → Lv.2 から始まっていた。
+   基本3点だけ(=実績0件)の状態を Lv.1 とする。n>=4(実績1件以上)の判定は従来と完全に同じ。 */
+const ROOM_BASE_ITEM_COUNT=3;
 function roomLevelOf(n){
-  if(n<=2)return 1;
+  if(n<=ROOM_BASE_ITEM_COUNT)return 1;
   if(n<=4)return 2;
   if(n<=6)return 3;
   if(n<=8)return 4;
@@ -7377,8 +7404,11 @@ function usePanjiro47Life({bandId,enabled,exercisedToday,justRecorded,forcePose}
 const ROOM_TODAY_ACCENT_TARGETS=['rug','zabuton','table'];
 function roomTodayAccentTarget(){return ROOM_TODAY_ACCENT_TARGETS[roomTodaySeed()%ROOM_TODAY_ACCENT_TARGETS.length];}
 function roomTodayAccentClass(id){return 'accent-'+id;} // 家具idから固定クラス
-function loadRoomTalkLog(){try{const a=JSON.parse(localStorage.getItem(ROOM_TALKLOG_KEY)||'[]');return Array.isArray(a)?a:[];}catch(e){return[];}}
-function pushRoomTalkLog(text){try{const a=loadRoomTalkLog();a.unshift({text:String(text||''),ts:Date.now()});localStorage.setItem(ROOM_TALKLOG_KEY,JSON.stringify(a.slice(0,30)));}catch(e){}}
+/* 【v51.4.5】会話ログをユーザー別キーに分離: yurutore_room_talklog_v1_{userId|guest}
+   旧共通キー(ROOM_TALKLOG_KEY そのもの)は誰のログか判別できないため、読み込まず・移行もしない。 */
+function roomTalkLogKey(uid){return ROOM_TALKLOG_KEY+'_'+(uid||'guest');}
+function loadRoomTalkLog(uid){try{const a=JSON.parse(localStorage.getItem(roomTalkLogKey(uid))||'[]');return Array.isArray(a)?a:[];}catch(e){return[];}}
+function pushRoomTalkLog(text,uid){try{const a=loadRoomTalkLog(uid);a.unshift({text:String(text||''),ts:Date.now()});localStorage.setItem(roomTalkLogKey(uid),JSON.stringify(a.slice(0,30)));}catch(e){}}
 function loadRoomSettings(){try{const s=JSON.parse(localStorage.getItem(ROOM_SETTINGS_KEY)||'{}');return{...ROOM_SETTINGS_DEFAULT,...(s&&typeof s==='object'?s:{})};}catch(e){return{...ROOM_SETTINGS_DEFAULT};}}
 function saveRoomSettings(s){try{localStorage.setItem(ROOM_SETTINGS_KEY,JSON.stringify(s));}catch(e){}}
 function isRoomNightNow(){const h=new Date().getHours();return h>=18||h<6;}
@@ -7517,7 +7547,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
     setSpeechOpen(true); // 【v30】発言時のみ会話ボックスを表示
     if(!spokenRef.current.has(text)){
       spokenRef.current.add(text);
-      pushRoomTalkLog(text);
+      pushRoomTalkLog(text,state&&state.auth); // 【v51.4.5】ユーザー別キーへ保存
       recordTalkStat(state&&state.auth); // 【v30】talkTotal+1 / talkDaysは同日1回
     }
   };
@@ -7821,7 +7851,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
   // 【v27新規追加】画像内メニューのタップ処理
   const onHotspot=(e,id)=>{
     e.stopPropagation(); // 背景の会話変更と二重発火しないように
-    if(id==='talklog'){setTalkLog(loadRoomTalkLog());setModal('talklog');return;}
+    if(id==='talklog'){setTalkLog(loadRoomTalkLog(state&&state.auth));setModal('talklog');return;}
     if(id==='album'){setModal('album');return;}
     if(id==='settings'){setModal('settings');return;}
     if(id==='mission'){setModal('mission');return;}
@@ -9724,20 +9754,17 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
       </div>
       <div style={{padding:'0 13px'}}>
         <div className="stat-row">
-          <div className="stat-box"><div className="stat-num">{since||47}</div><div className="stat-unit">{t('profile.statDays')}</div></div>
-          <div className="stat-box"><div className="stat-num">{total||38}</div><div className="stat-unit">{t('profile.statCount')}</div></div>
-          <div className="stat-box"><div className="stat-num">{Object.values(state.likes).filter(Boolean).length||12}</div><div className="stat-unit">{t('profile.statCheer')}</div></div>
+          <div className="stat-box"><div className="stat-num">{since}</div><div className="stat-unit">{t('profile.statDays')}</div></div>
+          <div className="stat-box"><div className="stat-num">{total}</div><div className="stat-unit">{t('profile.statCount')}</div></div>
+          <div className="stat-box"><div className="stat-num">{Object.values(state.likes).filter(Boolean).length}</div><div className="stat-unit">{t('profile.statCheer')}</div></div>
         </div>
         <div className="card" style={{background:'linear-gradient(135deg,#ecfaf5,#d4f0e8)'}}>
-          <div style={{fontSize:13,color:'#1a3030',lineHeight:1.8,fontStyle:'italic',textAlign:'center'}}>{t('ui.pfSince',{days:(since||47),name:state.user.name})}</div>
+          <div style={{fontSize:13,color:'#1a3030',lineHeight:1.8,fontStyle:'italic',textAlign:'center'}}>{total===0?t('ui.pfNoRecord'):since===0?t('ui.pfStartedToday',{name:state.user.name}):t('ui.pfSince',{days:since,name:state.user.name})}</div>
         </div>
         <div className="card">
           <div className="card-title">{t('home.recentTitle')}</div>
           {state.reports.length===0?(
-            <>
-              <div className="rec-row"><div><div style={{fontSize:13,fontWeight:600,color:'#1a3030'}}>🚶 {tl(ACTS[0])}</div><div style={{fontSize:11,color:'#a0b8b0',marginTop:1}}>{t('demo.today')}</div></div><span className="rec-tag">{t('misc.minutes',{n:30})}</span></div>
-              <div className="rec-row"><div><div style={{fontSize:13,fontWeight:600,color:'#1a3030'}}>🧘 {tl(ACTS[2])}</div><div style={{fontSize:11,color:'#a0b8b0',marginTop:1}}>{t('demo.yest')}</div></div><span className="rec-tag">{t('misc.minutes',{n:15})}</span></div>
-            </>
+            <div style={{fontSize:13,color:'#a0b8b0',padding:'12px 0'}}>{t('home.noRecord')}</div>
           ):(
             state.reports.slice(-4).reverse().map(r=>{const a=ACTS.find(x=>x.id===r.aid);return(
               <div key={r.id} className="rec-row">

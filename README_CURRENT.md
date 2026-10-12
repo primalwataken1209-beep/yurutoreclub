@@ -63,7 +63,7 @@ reports / blocks / RLS、13歳以上確認、SNS通報、SNSブロック、Auth�
 
 - 公開リーガルページを追加（ログイン不要・軽量な静的HTML・日英切替）
   - `/privacy/` `/terms/` `/community-guidelines/` `/account-deletion/` `/contact/`
-  - 運営者名 `[OPERATOR_NAME]` と問い合わせ先 `[SUPPORT_EMAIL]` は `legal/legal.js` の1か所で管理
+  - 運営者名と問い合わせ先は `legal/legal.js` の1か所で管理（v51.1で正式な値を設定済み）
 - 登録画面（新規登録タブのみ）に「私は13歳以上です」と規約同意表示を追加。ログイン画面には出さない
 - SNSに通報機能（投稿・コメント）とブロック機能を追加。既存SNSの見た目は変えていない
 - アプリ内アカウント削除を追加（2段階確認 → Supabase Edge Function で完全削除）

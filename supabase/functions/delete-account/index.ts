@@ -19,6 +19,10 @@
 //   → Authorization ヘッダの JWT から「本人」を特定します。
 //     クライアントから user_id を受け取ることは絶対にしません。
 //
+// 【v51.2 追記】
+//   SNS投稿写真（Storage: post-images/{userId}/）も削除対象に追加（STEP 2b）。
+//   それ以外の処理・CORS設定・認証の流れは v50 から変更していません。
+//
 // 【安全設計】
 //   ・認証済みユーザーのみ実行可能
 //   ・削除対象は必ず JWT から取り出した本人（他人は指定できない）
@@ -123,6 +127,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       console.error('[delete-account] STEP2 storage 失敗', e);
       return json({ ok: false, step: 'storage', error: String(e) }, 500);
+    }
+
+    // ── STEP 2b【v51.2追加】: Storage の post-images/{userId}/ 配下を削除 ──
+    // SNS投稿の写真。posts 行は profiles 削除の CASCADE で消えるが、
+    // Storage のファイルは連鎖しないため、ここで本人フォルダを明示的に空にする。
+    // 1投稿1枚のため件数が多くなり得るので、100件ずつ繰り返し削除する。
+    try {
+      let removed = 0;
+      for (let round = 0; round < 1000; round++) {
+        const { data: files, error: listErr } = await admin.storage
+          .from('post-images')
+          .list(userId, { limit: 100, offset: 0 });
+        if (listErr) {
+          // バケット未作成（v51.2 migration 未適用）の環境はスキップ扱い
+          console.warn('[delete-account] post-images list をスキップ', listErr);
+          skipped.push('storage:post-images');
+          break;
+        }
+        const names = (files ?? [])
+          .filter((f: { name: string; id?: string | null }) => f.id !== null)   // フォルダ行は除く
+          .map((f: { name: string }) => `${userId}/${f.name}`);
+        if (names.length === 0) {
+          done.push(`storage:post-images(${removed})`);
+          break;
+        }
+        const { error: rmErr } = await admin.storage.from('post-images').remove(names);
+        if (rmErr) throw rmErr;
+        removed += names.length;
+      }
+    } catch (e) {
+      console.error('[delete-account] STEP2b post-images 失敗', e);
+      return json({ ok: false, step: 'storage_post_images', error: String(e) }, 500);
     }
 
     // ── STEP 3: user_progress を削除（存在する環境のみ） ───────────────────
