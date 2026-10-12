@@ -2,8 +2,31 @@
 # 画面本体(index.html)が古いまま残ると「直したのに直っていない」ように見えるため、
 # HTML と app.js / style.css は毎回サーバーに確認してから使う。
 # 画像などの assets は今までどおり長期キャッシュしてよい（表示は速いまま）。
+#
+# 【v51.3】セキュリティヘッダーを追加（キャッシュ設定は v44 から変更なし）
+#   ・CSP は「いま動いている v51.2 を壊さないこと」を優先し、実コードで使っている
+#     外部ドメインだけを許可している（詳細と理由は README_v51_3_security_headers.md）
+#   ・script-src の 'unsafe-inline' は、index.html の中に React 本体を直接書いている
+#     （Babel が中身を <script> として展開する）現在の構成に必要。実ブラウザで確認済み。
+#   ・'unsafe-eval' は実測の結果 不要だったので入れていない
+#   ・X-Frame-Options: DENY と frame-ancestors 'none' は同じ意味。対応ブラウザでは
+#     frame-ancestors が優先されるため、両方あっても矛盾しない（古い端末向けの保険）
 /*
   Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=(), serial=()
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://eszheiabjwehcbrteqza.supabase.co https://*.googleusercontent.com; font-src 'self'; connect-src 'self' https://eszheiabjwehcbrteqza.supabase.co; upgrade-insecure-requests
+
+# 【任意・今は無効】必要になったら下の2行のコメントを外して有効化できます。
+#   Strict-Transport-Security … netlify.app は常時HTTPSのため通常は不要。
+#     独自ドメインへ移行し、サブドメインもすべてHTTPS化できたら有効化を検討。
+#   Cross-Origin-Opener-Policy … 別タブとの結びつきを切る。現在の Google ログインは
+#     同じタブでの遷移なので影響しないが、将来ポップアップ方式にする場合は要再確認。
+# /*
+#   Strict-Transport-Security: max-age=31536000; includeSubDomains
+#   Cross-Origin-Opener-Policy: same-origin-allow-popups
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
