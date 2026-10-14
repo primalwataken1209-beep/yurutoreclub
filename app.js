@@ -3108,14 +3108,17 @@ async function snsSoftDeletePost(uid,postId,imagePath){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
     /* 【v51.2】写真つき投稿は、投稿を非表示(is_deleted)にしたうえで写真ファイルも消す。
-       投稿の復元機能は無いため、写真だけがサーバーに残り続けないようにする。
-       写真の削除に失敗しても、投稿の削除は成立させる（他人からはRLSで見えない）。 */
+       【v51.4.6】順番を「写真の削除 → 投稿の削除」に変更。
+       写真の削除に失敗したら投稿は残したままエラーを返す（もう一度削除を押せば再試行できる）。
+       写真だけ消えて投稿の更新に失敗した場合も、投稿が残るので同じ操作で再試行できる
+       （存在しない写真の remove はエラーにならない）。写真が誰からも参照されずに残る状態を作らない。 */
     const own=snsIsOwnImagePath(uid,imagePath);
+    if(own&&!(await snsRemovePostImage(uid,imagePath)))
+      throw new Error('post image remove failed');
     const patch=own?{is_deleted:true,image_path:null}:{is_deleted:true};
     const {error}=await supabaseClient.from('posts')
       .update(patch).eq('id',postId).eq('user_id',uid);
     if(error)throw error;
-    if(own)await snsRemovePostImage(uid,imagePath);
     return snsOk(true);
   }catch(e){return snsNg(e,'削除できなかったみたい🐼');}
 }
