@@ -4,8 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 assert.equal(process.platform, 'linux');
-assert.notEqual(process.getuid(), 0, 'Tests must not run as root');
-assert.notEqual(process.getgid(), 0, 'Tests must not use the root group');
+assert.equal(process.getuid(), 65534, 'Tests must use the dedicated container UID');
+assert.equal(process.getgid(), 65534, 'Tests must use the dedicated container GID');
+assert.deepEqual(Object.keys(process.env).filter(key => /^(GITHUB_|RUNNER_)/.test(key)), [], 'Runner environment must not be inherited');
+assert.equal(fs.existsSync('/var/run/docker.sock'), false, 'Docker socket must not be exposed');
+assert.throws(() => fs.writeFileSync('/workspace/.offline-write-probe-' + process.pid, 'probe', { flag: 'wx' }), error => error.code === 'EROFS', 'Workspace must be mounted read-only');
 const status = fs.readFileSync('/proc/self/status', 'utf8');
 for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb']) {
   assert.match(status, new RegExp('^' + name + ':\\s+0+$', 'm'), name + ' must be empty');
@@ -18,7 +21,7 @@ assert.notEqual(fs.readlinkSync('/proc/self/ns/net'), hostNamespace, 'Must use a
 // reports the interfaces in this process's current network namespace.
 const interfaces = [...fs.readFileSync('/proc/self/net/dev', 'utf8').matchAll(/^\s*([^\s:]+):/gm)].map(match => match[1]).sort();
 assert.deepEqual(interfaces, ['lo'], 'No external network interfaces may be present');
-console.log('# isolation: non-root, zero capabilities, NoNewPrivs=1, separate network namespace');
+console.log('# isolation: dedicated UID, read-only workspace, no runner environment or Docker socket, zero capabilities, NoNewPrivs=1, separate network namespace');
 const files = fs.readdirSync('tests').filter(name => name.endsWith('.test.cjs')).sort().map(name => 'tests/' + name);
 assert.ok(files.length, 'Test files must exist');
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-reporter=tap', ...files], { stdio: 'inherit' });

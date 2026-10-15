@@ -15,7 +15,7 @@ PRで検証結果を確認し、取り込み・公開・本番SQL・Edge Functio
 
 ## CIと検証範囲
 
-`npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsでは依存取得後、外部ネットワークインターフェースのない名前空間でテストします。名前空間の作成だけを管理者権限で行い、Nodeの起動前にrunnerのUID/GIDへ戻し、補助グループと全capabilityを削除します。`no_new_privs`でsudo等による再昇格も禁止します。起動時に非root・権限ゼロ・再昇格禁止・ネットワーク分離を確認し、不一致ならテストを開始せず失敗します。
+`npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsでは依存取得後、公式Node 22イメージを取得してdigestを記録し、外部通信禁止のDockerコンテナでテストします。コンテナは専用UID/GID（65534）・全capability削除・再昇格禁止・ルートファイルシステムと作業フォルダの読み取り専用・一時領域のみ書き込み可能に設定します。runnerの環境変数・コマンドファイル・Dockerソケットは渡しません。起動時に専用UID・環境分離・読み取り専用・権限ゼロ・再昇格禁止・ネットワーク分離を確認し、不一致ならテストを開始せず失敗します。ログを表示するときはGitHub workflow commandの解釈を停止し、テスト出力から後続ステップへ命令が渡らないようにします。
 権限は `contents: read` のみ。Secrets、DB接続先、実ユーザーの認証情報を渡しません。結果はチェックの成否、Actions Summary、14日保存のTAP artifactで確認できます。
 
 - 静的検証: app.js / index.html内JSXの構文と一致、法務JSの構文、日英辞書キー一致。
