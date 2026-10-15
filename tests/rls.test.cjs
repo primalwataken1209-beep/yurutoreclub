@@ -22,6 +22,14 @@ test('repository migrations enforce RLS in an isolated in-memory PostgreSQL',asy
       $$ select (string_to_array($1,'/'))[1:array_length(string_to_array($1,'/'),1)-1] $$;
     grant select,insert,update,delete on storage.objects to authenticated;
   `);
+  // v28 predates the migrations directory. Apply it first so v50 exercises
+  // its app_events upgrade path, rather than silently skipping a missing table.
+  await db.exec(fs.readFileSync('supabase_v28_events.sql','utf8'));
+  // Model platform grants separately from the shipped policies; broad table
+  // access here ensures the assertions below actually test RLS restrictions.
+  await db.exec(`grant select,insert,update,delete on public.app_events to authenticated;
+    grant usage on sequence public.app_events_id_seq to authenticated;
+    insert into public.app_events(user_id,event) values ('cccccccc-cccc-cccc-cccc-cccccccccccc','app_open');`);
   for(const file of fs.readdirSync('supabase/migrations').filter(n=>n.endsWith('.sql')).sort()) {
     await db.exec(fs.readFileSync('supabase/migrations/'+file,'utf8'));
   }
@@ -39,6 +47,20 @@ test('repository migrations enforce RLS in an isolated in-memory PostgreSQL',asy
     await db.exec('set role '+(id?'authenticated':'anon'));
     return db.query(sql);
   };
+  await t.test('v28 events upgrade adds cascade FK and removes orphan rows',async()=>{
+    assert.equal((await db.query('select * from public.app_events')).rows.length,0);
+    const fk=await db.query("select confdeltype from pg_constraint where conname='app_events_user_id_fkey_v50' and conrelid='public.app_events'::regclass");
+    assert.equal(fk.rows[0]?.confdeltype,'c');
+  });
+  await t.test('events accept own inserts but deny impersonation and reading/updating',async()=>{
+    await as(A,"insert into public.app_events(event) values ('app_open')");
+    await as(B,"insert into public.app_events(event) values ('app_open')");
+    await assert.rejects(()=>as(B,`insert into public.app_events(user_id,event) values ('${A}','app_open')`),e=>e.code==='42501');
+    assert.equal((await as(A,'select * from public.app_events')).rows.length,0);
+    assert.equal((await as(A,"update public.app_events set event='panda_tap' returning id")).rows.length,0);
+    assert.equal((await as(A,'delete from public.app_events returning id')).rows.length,0);
+    await assert.rejects(()=>as(null,"insert into public.app_events(event) values ('app_open')"),e=>e.code==='42501');
+  });
   await t.test('private owner sees own post and image; B cannot read them',async()=>{
     assert.equal((await as(A,`select * from public.posts where id='${P}'`)).rows.length,1);
     assert.equal((await as(A,`select * from storage.objects where name='${A}/${P}.jpg'`)).rows.length,1);
@@ -70,5 +92,10 @@ test('repository migrations enforce RLS in an isolated in-memory PostgreSQL',asy
     assert.equal((await as(A,`select * from public.posts where id='${Q}'`)).rows.length,0);
     assert.equal((await as(A,`select * from storage.objects where name='${B}/${Q}.jpg'`)).rows.length,0);
     assert.equal((await as(B,`select * from public.posts where id='${Q}'`)).rows.length,1);
+  });
+  await t.test('Auth deletion cascades only the deleted users events',async()=>{
+    await db.exec('reset role');
+    await db.query('delete from auth.users where id=$1',[A]);
+    assert.deepEqual((await db.query('select user_id from public.app_events')).rows,[{user_id:B}]);
   });
 });

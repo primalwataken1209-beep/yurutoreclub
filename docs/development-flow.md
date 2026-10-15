@@ -15,12 +15,12 @@ PRで検証結果を確認し、取り込み・公開・本番SQL・Edge Functio
 
 ## CIと検証範囲
 
-`npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsでは依存取得後、ネットワークインターフェースのない名前空間でテストします。
+`npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsでは依存取得後、外部ネットワークインターフェースのない名前空間でテストします。名前空間の作成だけを管理者権限で行い、Nodeの起動前にrunnerのUID/GIDへ戻し、補助グループと全capabilityを削除します。`no_new_privs`でsudo等による再昇格も禁止します。起動時に非root・権限ゼロ・再昇格禁止・ネットワーク分離を確認し、不一致ならテストを開始せず失敗します。
 権限は `contents: read` のみ。Secrets、DB接続先、実ユーザーの認証情報を渡しません。結果はチェックの成否、Actions Summary、14日保存のTAP artifactで確認できます。
 
 - 静的検証: app.js / index.html内JSXの構文と一致、法務JSの構文、日英辞書キー一致。
 - 基本動作: JSDOMにローカルReactを読み込み、初期画面と体験版入口の画面変化を確認。外部リソース自動ロードを無効化し、fetch/XHR/WebSocketを拒否。
-- RLS: PGliteのメモリ内PostgreSQLへリポジトリ内の全migrationを順番に適用。auth/storageの最小スキーマをテスト内で用意し、架空ユーザーA/Bとanonを非管理者ロールに切り替えて検証。非公開投稿・コメント・リアクション・写真、他人名義の書き込み、削除済み公開投稿を確認。
+- RLS: PGliteのメモリ内PostgreSQLへ旧版 `supabase_v28_events.sql`、続いて `supabase/migrations/` の全SQLを順番に適用。auth/storageの最小スキーマをテスト内で用意し、架空ユーザーA/Bとanonを非管理者ロールに切り替えて検証。非公開投稿・コメント・リアクション・写真、他人名義の書き込み、削除済み公開投稿を確認。app_eventsは本人INSERTのみ許可、他人名義INSERT/閲覧/更新/削除を拒否し、v50での孤立行整理・CASCADE外部キー追加・Auth退会時に本人分だけ連鎖削除されることを確認。
 - 投稿写真削除: 実関数を抽出してモックに接続。写真を先に削除、Storage失敗で投稿更新しない、DB更新失敗を報告、他人の写真を消さないことを確認。
 - 退会: 実Edge FunctionをTypeScript変換し、SDKの代わりにモックを注入。両バケットの通信/権限/サーバー障害でDB/Auth削除を止めること、バケット不存在のみスキップ、複数ページ削除、認証本人だけが対象になることを確認。
 

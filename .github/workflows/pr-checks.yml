@@ -28,11 +28,16 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run checks without network interfaces
         id: tests
-        # Dependencies are local now. Even accidental HTTP from tested code cannot
-        # reach production: Linux creates a separate network namespace, no NIC.
+        # Only namespace creation is privileged. Node runs as the runner user,
+        # with no capabilities and no ability to regain privileges via sudo.
         run: |
           mkdir -p test-results
-          sudo unshare --net -- "$(command -v node)" --test --test-concurrency=1 --test-reporter=tap tests/*.test.cjs > test-results/tests.tap 2>&1
+          host_netns="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- setpriv \
+            --reuid="$(id -u)" --regid="$(id -g)" --clear-groups \
+            --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
+            --no-new-privs -- "$(command -v node)" \
+            scripts/run-offline-tests.cjs "$host_netns" > test-results/tests.tap 2>&1
       - name: Report results
         if: always()
         env:
