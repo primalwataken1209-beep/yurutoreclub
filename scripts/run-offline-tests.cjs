@@ -14,7 +14,9 @@ assert.match(status, /^NoNewPrivs:\s+1$/m, 'Privilege escalation must be disable
 const hostNamespace = process.argv[2];
 assert.match(hostNamespace || '', /^net:\[\d+\]$/);
 assert.notEqual(fs.readlinkSync('/proc/self/ns/net'), hostNamespace, 'Must use an isolated network namespace');
-const interfaces = fs.readdirSync('/sys/class/net');
+// sysfs can retain the host mount's view after unshare; /proc/self/net
+// reports the interfaces in this process's current network namespace.
+const interfaces = [...fs.readFileSync('/proc/self/net/dev', 'utf8').matchAll(/^\s*([^\s:]+):/gm)].map(match => match[1]).sort();
 assert.deepEqual(interfaces, ['lo'], 'No external network interfaces may be present');
 console.log('# isolation: non-root, zero capabilities, NoNewPrivs=1, separate network namespace');
 const files = fs.readdirSync('tests').filter(name => name.endsWith('.test.cjs')).sort().map(name => 'tests/' + name);
