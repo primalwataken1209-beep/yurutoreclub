@@ -21,7 +21,7 @@ test('real Chromium: offline guest flow, languages, room, mobile and privacy',{t
   }
   const ctx=await context();const page=await ctx.newPage();page.setDefaultTimeout(15000);
   const picture=async(name,p=page)=>{const bytes=await p.screenshot({type:'jpeg',quality:65,fullPage:false});t.diagnostic('BROWSER_IMAGE '+name+' '+bytes.toString('base64'));};
-  t.after(async()=>{if(!page.isClosed())await picture('final-state.jpg').catch(()=>{});t.diagnostic('BROWSER_MISSING '+JSON.stringify([...new Set(fixture.missing)]));await browser.close();});
+  t.after(async()=>{try{await picture('final-state.jpg');}finally{t.diagnostic('BROWSER_MISSING '+JSON.stringify([...new Set(fixture.missing)]));await browser.close();}});
   await page.goto(fixture.origin+'/',{waitUntil:'networkidle'});
   await t.test('desktop renders once and Japanese/English switching works',async()=>{
     await page.getByRole('button',{name:'まずは体験してみる',exact:true}).waitFor();

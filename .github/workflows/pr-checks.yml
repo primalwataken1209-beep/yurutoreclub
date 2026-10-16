@@ -121,7 +121,12 @@ jobs:
             > "$OFFLINE_WORK_DIR/reports/browser.tap" 2>&1
       - name: Extract browser screenshots as data
         if: always() && env.OFFLINE_WORK_DIR != ''
-        run: python3 "$GITHUB_WORKSPACE/trusted-checks/scripts/extract-browser-images.py" "$OFFLINE_WORK_DIR/reports"
+        env:
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+        run: |
+          arguments=()
+          if [ "$BROWSER_OUTCOME" = success ]; then arguments+=(--require-complete); fi
+          python3 "$GITHUB_WORKSPACE/trusted-checks/scripts/extract-browser-images.py" "$OFFLINE_WORK_DIR/reports" "${arguments[@]}"
       - name: Report results
         if: always()
         env:
