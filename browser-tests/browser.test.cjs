@@ -5,11 +5,18 @@ const {startFixture}=require('./fixture.cjs');
 test('real Chromium: offline guest flow, languages, room, mobile and privacy',{timeout:120000},async t=>{
   const fixture=await startFixture();t.after(()=>fixture.server.close());
   const browser=await chromium.launch({headless:true});
-  const outside=[];const pageErrors=[];
+  const outside=[];const pageErrors=[];const policyErrors=[];const diagnosticHistory=[];
   async function context(options={}){
     const ctx=await browser.newContext({locale:'ja-JP',viewport:{width:1000,height:1000},serviceWorkers:'block',...options});
     await ctx.route('**/*',route=>{const url=route.request().url();if(url.startsWith(fixture.origin+'/'))return route.continue();outside.push(url);return route.abort();});
-    ctx.on('page',page=>page.on('pageerror',error=>pageErrors.push(error.message)));
+    ctx.on('page',page=>{
+      page.on('pageerror',error=>pageErrors.push(error.message));
+      page.on('console',message=>{
+        const text=message.text();
+        if(text.startsWith('__OFFLINE_DIAGNOSTICS__'))diagnosticHistory.push(JSON.parse(text.slice('__OFFLINE_DIAGNOSTICS__'.length)));
+        if(message.type()==='error'&&/Content Security Policy/i.test(text))policyErrors.push(text);
+      });
+    });
     return ctx;
   }
   const ctx=await context();const page=await ctx.newPage();page.setDefaultTimeout(15000);
@@ -56,7 +63,8 @@ test('real Chromium: offline guest flow, languages, room, mobile and privacy',{t
     assert.match(await legal.locator('body').innerText(),/プライバシー/);
     const diagnostics=JSON.parse(await page.locator('html').getAttribute('data-offline-diagnostics'));
     assert.deepEqual(diagnostics,{errors:[],network:[],policy:[]});
-    assert.deepEqual(pageErrors,[]);assert.deepEqual(outside,[]);
+    for(const entry of diagnosticHistory)assert.deepEqual(entry,{errors:[],network:[],policy:[]});
+    assert.deepEqual(pageErrors,[]);assert.deepEqual(policyErrors,[]);assert.deepEqual(outside,[]);
     await legal.close();
   });
 });
