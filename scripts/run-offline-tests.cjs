@@ -2,6 +2,7 @@
 // or privilege dropping was not applied by the workflow.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 assert.equal(process.platform, 'linux');
 assert.equal(process.getuid(), 65534, 'Tests must use the dedicated container UID');
@@ -22,7 +23,10 @@ assert.notEqual(fs.readlinkSync('/proc/self/ns/net'), hostNamespace, 'Must use a
 const interfaces = [...fs.readFileSync('/proc/self/net/dev', 'utf8').matchAll(/^\s*([^\s:]+):/gm)].map(match => match[1]).sort();
 assert.deepEqual(interfaces, ['lo'], 'No external network interfaces may be present');
 console.log('# isolation: dedicated UID, read-only workspace, no runner environment or Docker socket, zero capabilities, NoNewPrivs=1, separate network namespace');
-const files = fs.readdirSync('tests').filter(name => name.endsWith('.test.cjs')).sort().map(name => 'tests/' + name);
+// Required tests come from the trusted checkout, while cwd stays /workspace:
+// all application, SQL and Edge Function inputs are the exact PR tree.
+const testDirectory = path.resolve(__dirname, '../tests');
+const files = fs.readdirSync(testDirectory).filter(name => name.endsWith('.test.cjs')).sort().map(name => path.join(testDirectory, name));
 assert.ok(files.length, 'Test files must exist');
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-reporter=tap', ...files], { stdio: 'inherit' });
 if (result.error) throw result.error;

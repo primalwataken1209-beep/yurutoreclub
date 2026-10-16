@@ -15,11 +15,11 @@ PRで検証結果を確認し、取り込み・公開・本番SQL・Edge Functio
 
 ## CIと検証範囲
 
-ローカルは `npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsの通常PR検証は `pull_request_target` を使い、承認済みのbase/default側にある手順でPRの固定HEADを検証します。PR内の手順変更は、そのPRを検証するlauncherには反映されません。権限を読み取りだけに制限し、PRコードをホストで実行しません。
+ローカルは `npm ci --ignore-scripts` → `npm test`（Node 22）。GitHub Actionsの通常PR検証は `pull_request_target` を使い、承認済みのbase/default側にある手順・実行スクリプト・必須テスト・依存定義でPRの固定HEADを検証します。実行時の作業ディレクトリはPR版なので、アプリ・SQL・Edge Functionの入力はPRのコードです。PR内のCI/テスト変更は、そのPRを判定する必須テストには反映されません。変更したテスト自体はメンテナがレビューし、承認済みの版へ取り込んだ後に必須セットへ加わります。権限を読み取りだけに制限し、PRコードをホストで実行しません。
 
 公式Node 22イメージを検証済みdigestで固定しています。依存取得も専用コンテナで行い、ライフサイクルスクリプトを無効化し、通常ファイルと確認したpackage.jsonとlockfileだけを渡します。テスト用コンテナは外部通信禁止・専用UID/GID（65534）・全capability削除・再昇格禁止・ルートファイルシステムとPRコード/依存の読み取り専用・一時領域のみ書き込み可能に設定します。runnerの環境変数・コマンドファイル・Dockerソケットは渡しません。起動時に隔離条件を確認し、不一致ならテストを開始せず失敗します。
 
-レポートはcheckout外のRUNNER_TEMPに毎回新規作成するディレクトリへ保存します。PRがtest-results等をsymlinkに差し替えても保存先には使いません。テスト/依存取得コンテナにはレポート保存先をマウントしません。ログ表示時はGitHub workflow commandの解釈も停止します。Summaryには実際に検証したHEAD SHAを記載します。
+レポートはcheckout外のRUNNER_TEMPに毎回新規作成するディレクトリへ保存します。PRがtest-results等をsymlinkに差し替えても保存先には使いません。テスト/依存取得コンテナにはレポート保存先をマウントしません。各ログは10 MiBを上限とし、超過したら失敗してコンテナを停止します。Docker側の内部ログ保存も無効化します。ログ表示時はGitHub workflow commandの解釈も停止します。Summaryには実際に検証したHEAD SHAを記載します。
 権限は `contents: read` のみ。Secrets、DB接続先、実ユーザーの認証情報を渡しません。結果はチェックの成否、Actions Summary、14日保存のTAP artifactで確認できます。
 
 - 静的検証: app.js / index.html内JSXの構文と一致、法務JSの構文、日英辞書キー一致。
