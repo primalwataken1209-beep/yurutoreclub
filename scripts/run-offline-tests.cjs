@@ -25,7 +25,7 @@ assert.deepEqual(interfaces, ['lo'], 'No external network interfaces may be pres
 console.log('# isolation: dedicated UID, read-only workspace, no runner environment or Docker socket, zero capabilities, NoNewPrivs=1, separate network namespace');
 // Required tests come from the trusted checkout, while cwd stays /workspace:
 // all application, SQL and Edge Function inputs are the exact PR tree.
-const testDirectory = path.resolve(__dirname, '../tests');
+const testDirectory = path.resolve(__dirname, process.argv[3]==='--browser'?'../browser-tests':'../tests');
 const files = fs.readdirSync(testDirectory).filter(name => name.endsWith('.test.cjs')).sort().map(name => path.join(testDirectory, name));
 assert.ok(files.length, 'Test files must exist');
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-reporter=tap', ...files], { stdio: 'inherit' });
