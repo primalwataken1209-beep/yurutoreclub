@@ -4,7 +4,7 @@ const {chromium}=require('playwright');
 const {startFixture}=require('./fixture.cjs');
 test('real Chromium: offline guest flow, languages, room, mobile and privacy',{timeout:120000},async t=>{
   const fixture=await startFixture();t.after(()=>fixture.server.close());
-  const browser=await chromium.launch({headless:true});
+  const browser=await chromium.launch({headless:true,chromiumSandbox:true});
   const outside=[];const pageErrors=[];const policyErrors=[];const diagnosticHistory=[];
   async function context(options={}){
     const ctx=await browser.newContext({locale:'ja-JP',viewport:{width:1000,height:1000},serviceWorkers:'block',...options});

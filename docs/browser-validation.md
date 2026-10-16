@@ -2,6 +2,8 @@
 
 既存の26件に加え、Chromiumで画面の表示と体験版を検証します。追加Secretsは不要です。
 
+Chromium自身のsandboxも有効にし、公式Playwright v1.64.0のseccomp_profile.json（Git blob `fddc05fb520affb145404e6f6f647ca96af8087d`）を同梱して使用します。ホストの権限やシステム設定は変更しません。
+
 ## 検証対象
 
 - デスクトップで1画面だけ表示されること、日英切替

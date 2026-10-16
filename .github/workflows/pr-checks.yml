@@ -108,6 +108,7 @@ jobs:
           ulimit -f 10240
           docker run --rm --init --name "$container_name" --log-driver none --network none --user 65534:65534 \
             --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --security-opt "seccomp=$GITHUB_WORKSPACE/trusted-checks/browser-tests/seccomp_profile.json" \
             --pids-limit 256 --memory 3g --shm-size 256m \
             --tmpfs /tmp:rw,nosuid,nodev,size=1g \
             --mount "type=bind,source=$GITHUB_WORKSPACE/pr-source,target=/workspace,readonly" \
