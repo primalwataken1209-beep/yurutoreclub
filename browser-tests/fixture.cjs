@@ -3,7 +3,13 @@ const path=require('node:path');
 const http=require('node:http');
 const {once}=require('node:events');
 const repo=process.cwd();
-const csp="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://eszheiabjwehcbrteqza.supabase.co https://*.googleusercontent.com; font-src 'self'; connect-src 'self' https://eszheiabjwehcbrteqza.supabase.co; upgrade-insecure-requests";
+// PR #2 snapshot is used only until a CSP exists in the repository headers.
+const pr2Csp="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://eszheiabjwehcbrteqza.supabase.co https://*.googleusercontent.com; font-src 'self'; connect-src 'self' https://eszheiabjwehcbrteqza.supabase.co; upgrade-insecure-requests";
+const readCsp=file=>fs.readFileSync(file,'utf8').match(/^\s+Content-Security-Policy:\s*(.+)$/mi)?.[1];
+const candidateCsp=readCsp(path.join(repo,'_headers'));
+const trustedCsp=readCsp(path.resolve(__dirname,'../_headers'));
+if(trustedCsp&&!candidateCsp)throw new Error('PR removed the required CSP header');
+const csp=candidateCsp||pr2Csp;
 const isolation="default-src 'none'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; worker-src 'none'";
 const guard=`window.supabase=undefined;const diagnostics={errors:[],network:[],policy:[]};const sync=()=>document.documentElement.setAttribute('data-offline-diagnostics',JSON.stringify(diagnostics));const deny=(kind,url)=>{diagnostics.network.push(kind+':'+String(url));sync();throw new Error('Offline test blocks '+kind);};window.fetch=(url)=>{try{deny('fetch',url);}catch(e){return Promise.reject(e);}};window.XMLHttpRequest=function(){deny('XHR','');};window.WebSocket=function(url){deny('WebSocket',url);};navigator.sendBeacon=url=>{deny('beacon',url);};window.open=url=>{deny('window.open',url);};addEventListener('error',e=>{diagnostics.errors.push(e.message);sync();});addEventListener('unhandledrejection',e=>{diagnostics.errors.push(String(e.reason));sync();});addEventListener('securitypolicyviolation',e=>{diagnostics.policy.push(e.violatedDirective+':'+e.blockedURI);sync();});sync();`;
 const vendor={

@@ -24,7 +24,7 @@ jobs:
       TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       # Official Node 22 image, pinned to the digest verified during bootstrap.
       TEST_IMAGE: node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
-      BROWSER_IMAGE: mcr.microsoft.com/playwright:v1.64.0-noble
+      BROWSER_IMAGE: mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
     steps:
       - name: Check out trusted checks
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
