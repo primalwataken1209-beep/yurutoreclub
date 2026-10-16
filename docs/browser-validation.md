@@ -2,7 +2,7 @@
 
 既存の26件に加え、Chromiumで画面の表示と体験版を検証します。追加Secretsは不要です。
 
-Chromium自身のsandboxも有効にし、公式Playwright v1.64.0のseccomp_profile.json（Git blob `fddc05fb520affb145404e6f6f647ca96af8087d`）を同梱して使用します。ホストの権限やシステム設定は変更しません。
+Chromium自身のsandboxも有効にします。公式Playwright v1.64.0のseccomp_profile.json（元のGit blob `fddc05fb520affb145404e6f6f647ca96af8087d`）を基に、cap-drop ALLと併用するためnamespace内のchrootシステムコールだけを追加で許可しています。カーネル側の権限チェックはそのままです。ホストのcapability追加やシステム設定変更は行いません。
 
 ## 検証対象
 

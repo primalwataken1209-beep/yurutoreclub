@@ -51,11 +51,12 @@
 	],
 	"syscalls": [
 		{
-			"comment": "Allow create user namespaces",
+			"comment": "Allow user namespaces and Chromium's namespace-local filesystem sandbox (kernel capability checks still apply)",
 			"names": [
 				"clone",
 				"setns",
-				"unshare"
+				"unshare",
+				"chroot"
 			],
 			"action": "SCMP_ACT_ALLOW",
 			"args": [],
