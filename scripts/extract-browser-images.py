@@ -6,7 +6,7 @@ import sys
 
 folder = pathlib.Path(sys.argv[1])
 report = folder / "browser.tap"
-allowed = {"welcome-ja.jpg", "guest-home.jpg", "guest-room.jpg", "mobile-welcome.jpg", "final-state.jpg"}
+allowed = {"welcome-ja.jpg", "guest-home.jpg", "guest-room.jpg", "mobile-welcome.jpg", "privacy.jpg", "final-state.jpg"}
 found = set()
 if report.exists():
     for line in report.read_text(encoding="utf-8", errors="replace").splitlines():

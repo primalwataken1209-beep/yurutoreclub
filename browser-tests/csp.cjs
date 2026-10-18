@@ -7,19 +7,22 @@ function parseHeaders(text){
       const route=line.trim();
       if(!/^\/[A-Za-z0-9_./*-]*$/.test(route)||route.includes('**'))throw new Error('Unsupported header route: '+route);
       block={route,policies:[]};blocks.push(block);
-    }else if(/^\s+Content-Security-Policy:/i.test(line)){
+    }else {
+      if(!/^ {2}[^\s:]+:\s*\S/.test(line))throw new Error('Invalid header indentation or syntax: '+line);
+      if(!/^ {2}Content-Security-Policy:/i.test(line))continue;
       if(!block)throw new Error('CSP without route');
-      block.policies.push(line.replace(/^\s+Content-Security-Policy:\s*/i,''));
+      block.policies.push(line.replace(/^ {2}Content-Security-Policy:\s*/i,''));
     }
   }
   return blocks;
 }
 function policiesFor(blocks,pathname){
-  return blocks.filter(({route})=>new RegExp('^'+route.split('*').map(part=>part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('.*')+'$').test(pathname)).flatMap(b=>b.policies);
+  return blocks.find(({route})=>new RegExp('^'+route.split('*').map(part=>part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('.*')+'$').test(pathname))?.policies||[];
 }
 function selectPolicies(candidate,trusted,pathname,fallback){
   const actual=policiesFor(candidate,pathname);
-  if(!actual.length&&(policiesFor(trusted,pathname).length||candidate.some(b=>b.policies.length)))throw new Error('Missing CSP for '+pathname);
+  const documentRoute=['/','/index.html','/privacy/','/privacy/index.html'].includes(pathname);
+  if(documentRoute&&!actual.length&&(policiesFor(trusted,pathname).length||candidate.some(b=>b.policies.length)))throw new Error('Missing CSP for '+pathname);
   return actual.length?actual:[fallback];
 }
 function assertScriptsAllowed(policies,urls){

@@ -2,19 +2,18 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 const {startFixture}=require('./fixture.cjs');
+const {collectConsole,assertConsoleClean,assertPrivacyVisible}=require('./assertions.cjs');
 test('real Chromium: offline guest flow, languages, room, mobile and privacy',{timeout:120000},async t=>{
   const fixture=await startFixture();t.after(()=>fixture.server.close());
   const browser=await chromium.launch({headless:true,chromiumSandbox:true});
-  const outside=[];const pageErrors=[];const policyErrors=[];const diagnosticHistory=[];
+  const outside=[];const pageErrors=[];const consoleErrors=[];const diagnosticHistory=[];
   async function context(options={}){
     const ctx=await browser.newContext({locale:'ja-JP',viewport:{width:1000,height:1000},serviceWorkers:'block',...options});
     await ctx.route('**/*',route=>{const url=route.request().url();if(url.startsWith(fixture.origin+'/'))return route.continue();outside.push(url);return route.abort();});
     ctx.on('page',page=>{
       page.on('pageerror',error=>pageErrors.push(error.message));
       page.on('console',message=>{
-        const text=message.text();
-        if(text.startsWith('__OFFLINE_DIAGNOSTICS__'))diagnosticHistory.push(JSON.parse(text.slice('__OFFLINE_DIAGNOSTICS__'.length)));
-        if(message.type()==='error'&&/Content Security Policy/i.test(text))policyErrors.push(text);
+        collectConsole(message,consoleErrors,diagnosticHistory);
       });
     });
     return ctx;
@@ -60,11 +59,26 @@ test('real Chromium: offline guest flow, languages, room, mobile and privacy',{t
   });
   await t.test('privacy renders; no JS failures, CSP violations or external requests',async()=>{
     const legal=await ctx.newPage();await legal.goto(fixture.origin+'/privacy/',{waitUntil:'networkidle'});
-    assert.match(await legal.locator('body').innerText(),/プライバシー/);
+    await assertPrivacyVisible(legal);
+    await picture('privacy.jpg',legal);
     const diagnostics=JSON.parse(await page.locator('html').getAttribute('data-offline-diagnostics'));
     assert.deepEqual(diagnostics,{errors:[],network:[],policy:[]});
     for(const entry of diagnosticHistory)assert.deepEqual(entry,{errors:[],network:[],policy:[]});
-    assert.deepEqual(pageErrors,[]);assert.deepEqual(policyErrors,[]);assert.deepEqual(outside,[]);
+    assert.deepEqual(pageErrors,[]);assertConsoleClean(consoleErrors);assert.deepEqual(outside,[]);
     await legal.close();
   });
+});
+
+test('privacy visibility rejects hidden content and opaque overlays',async t=>{
+  const browser=await chromium.launch({headless:true,chromiumSandbox:true});
+  t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(400);
+  for(const css of ['display:none','visibility:hidden','opacity:0']){
+    await page.setContent('<h1 style="'+css+'">プライバシーポリシー</h1>');
+    await assert.rejects(()=>assertPrivacyVisible(page));
+  }
+  await page.setContent('<h1>プライバシーポリシー</h1><div style="position:fixed;inset:0;background:white;z-index:999"></div>');
+  await assert.rejects(()=>assertPrivacyVisible(page),/unobstructed/);
+  await page.setContent('<h1>プライバシーポリシー</h1>');
+  await assertPrivacyVisible(page);
 });
