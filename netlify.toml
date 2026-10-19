@@ -1,0 +1,7 @@
+# Staging branch only. Production deploys deliberately fail before publishing.
+[build]
+  command = "node scripts/build-staging.cjs"
+  publish = "staging-dist"
+
+[build.environment]
+  NODE_VERSION = "22"

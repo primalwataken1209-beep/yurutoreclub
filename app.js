@@ -654,15 +654,20 @@ en:{
 /* ═══════════════ Supabase設定 ═══════════════ */
 // ここにはSupabaseの「Anon(Public) Key」だけを書いてください。
 // Service Role Key（秘密鍵）は絶対にフロントエンドのコードに書かないでください。
-const SUPABASE_URL='https://eszheiabjwehcbrteqza.supabase.co';
-const SUPABASE_ANON_KEY='sb_publishable_XINCdNEKIrUVQJY8tZlOPw_wp8eJ7CW';
-const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const SUPABASE_URL='https://knftduojdalnawvkbelt.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_SV78CPBCb2wE5xqTuSp11A_gtsKSuXl';
+function stagingFetch(input,options){
+  const url=new URL(typeof input==='string'?input:input.url);
+  if(url.origin!==SUPABASE_URL)throw new Error('Blocked non-staging API request');
+  return window.fetch(input,options);
+}
+const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,{global:{fetch:stagingFetch}}) : null;
 
 /* ═══════════════ 【v43.1】認証の戻り先URL ═══════════════
    GoogleログインやパスワードGoogle再設定のあと、どこへ戻すかをここ1か所で決める。
-   本番は必ず公開URLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
+   stagingは許可したテストURLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
    ローカル開発(localhost / 127.0.0.1 / file://)のときだけ、いま開いている場所へ戻す。 */
-const APP_PUBLIC_URL='https://yurutore-club.netlify.app/';
+const STAGING_GOOGLE_ENABLED=false;
 
 /* ═══════════════ 【v50新規追加】リーガル設定 ═══════════════
    公開ページ（/privacy/ など）は静的HTMLで、legal/legal.js に同じ設定がある。
@@ -689,12 +694,12 @@ const REPORT_REASONS=[
   {id:'other',         key:'legal.reasonOther'}
 ];
 function authRedirectTo(){
-  try{
-    const h=location.hostname||'';
-    const isLocal=(h==='localhost'||h==='127.0.0.1'||h==='::1'||h===''||h.endsWith('.local'));
-    if(isLocal)return location.origin+location.pathname;   // クエリは付けない（?code= の二重付与を防ぐ）
-    return APP_PUBLIC_URL;
-  }catch(e){return APP_PUBLIC_URL;}
+  const here=new URL(location.href);
+  const local=['localhost','127.0.0.1','[::1]'].includes(here.hostname);
+  const preview=/^deploy-preview-[0-9]+--yurutore-club\.netlify\.app$/.test(here.hostname);
+  const staging=here.hostname==='yurutore-club-staging.netlify.app';
+  if((local&&['http:','https:'].includes(here.protocol))||((preview||staging)&&here.protocol==='https:'))return here.origin+'/';
+  throw new Error('Staging authentication is disabled on this host');
 }
 
 /* OAuthから戻ってきた直後、URLに残る ?code= / #access_token= を消す。
@@ -3854,7 +3859,7 @@ function AppLogic({devId}){
       const {data,error}=await supabaseClient.auth.signUp({
         email:email.trim(),
         password:pass,
-        options:{emailRedirectTo:location.origin+location.pathname}
+        options:{emailRedirectTo:authRedirectTo()}
       });
       if(error)throw error;
       // data.session がある＝Supabase側の「メール確認」設定がオフで、すぐ使える状態
@@ -3885,7 +3890,7 @@ function AppLogic({devId}){
     try{
       authBusyRef.current=true;
       setAuthLoading(true);
-      const {error}=await supabaseClient.auth.resend({type:'signup',email});
+      const {error}=await supabaseClient.auth.resend({type:'signup',email,options:{emailRedirectTo:authRedirectTo()}});
       if(error)throw error;
       setAuthNotice(t('msg.resendOk'));
     }catch(error){
@@ -3924,6 +3929,7 @@ function AppLogic({devId}){
   // 【修正】Googleログイン（try/catch/finally化）
   // Supabase側でGoogle Providerが未設定でも、エラーメッセージが出るだけでアプリは壊れない
   const handleGoogleLogin=async()=>{
+    if(!STAGING_GOOGLE_ENABLED){setAuthError(t('msg.googleConfig'));return;}
     if(authBusyRef.current)return;
     setAuthError('');
     if(!supabaseClient){setAuthError(t('msg.serverFail'));return;}
@@ -3932,7 +3938,7 @@ function AppLogic({devId}){
       setAuthLoading(true);
       /* 【v43.1】戻り先を本番URLに固定する（authRedirectTo）。
          Supabaseの Authentication → URL Configuration の Redirect URLs にも
-         https://yurutore-club.netlify.app/ を登録しておくこと。
+         [production URL omitted on staging] を登録しておくこと。
          戻ってきたら onAuthStateChange / getSession がセッションを拾い、
          そのままホーム画面へ進む（下の「画面の入口」判定を参照）。 */
       const {error}=await supabaseClient.auth.signInWithOAuth({
@@ -4399,7 +4405,7 @@ function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPasswor
             onContinue();
           }
         }}>{authLoading?t('common.checking'):mode==='register'?t('auth.submitRegister'):t('auth.submitLogin')}</button>
-        {onGoogleLogin&&<>
+        {STAGING_GOOGLE_ENABLED&&onGoogleLogin&&<>
           <div style={{display:'flex',alignItems:'center',gap:8,margin:'12px 0'}}>
             <div style={{flex:1,height:1,background:'#dceee8'}}/><span style={{fontSize:11,color:'#b0c8c0'}}>{t('common.or')}</span>
             <div style={{flex:1,height:1,background:'#dceee8'}}/>
@@ -4534,7 +4540,7 @@ function RegisterScreen({onDone,onLogin,onRegister,onGoogleLogin,onResetPassword
             goOnboard();
           }
         }}>{authLoading?t('common.checking'):mode==='register'?t('auth.submitRegister'):t('auth.submitLogin')}</button>
-        {onGoogleLogin&&<>
+        {STAGING_GOOGLE_ENABLED&&onGoogleLogin&&<>
           <div style={{display:'flex',alignItems:'center',gap:8,margin:'10px 0'}}>
             <div style={{flex:1,height:1,background:'#dceee8'}}/><span style={{fontSize:11,color:'#b0c8c0'}}>{t('common.or')}</span>
             <div style={{flex:1,height:1,background:'#dceee8'}}/>
@@ -9905,7 +9911,7 @@ function isLocalDevHost(){
    ・古いビルドがキャッシュされている
    といった経路で、本番ユーザーに2画面が出てしまう可能性が残っていた。
    → v44 では「開発環境(localhost)で、かつ ?preview=1」の両方が成立したときだけに変更。
-     本番ホスト(https://yurutore-club.netlify.app/ など)では、URLに何を付けても
+     本番ホスト([production URL omitted on staging] など)では、URLに何を付けても
      2画面のデバイスプレビューは絶対に表示されない。 */
 function devPreviewOn(){
   try{
