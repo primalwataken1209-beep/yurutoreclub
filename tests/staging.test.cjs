@@ -43,6 +43,8 @@ test('preview build excludes administrative files and rejects production builds'
   try{
     assert.throws(()=>build(tmp,{CONTEXT:'production',BRANCH:'staging/isolated-test-app'}),/Only staging/);
     assert.throws(()=>build(tmp,{CONTEXT:'deploy-preview',BRANCH:'main'}),/Unexpected/);
+    build(tmp,{CONTEXT:'deploy-preview',BRANCH:'pull/5/head',HEAD:'staging/isolated-test-app'});
+    assert.throws(()=>build(tmp,{CONTEXT:'deploy-preview',BRANCH:'pull/5/head',HEAD:'other-branch'}),/Unexpected/);
     build(tmp,{CONTEXT:'offline-test',BRANCH:'staging/isolated-test-app'});
     for(const name of ['staging','supabase','tests','scripts','.github'])assert.ok(!fs.existsSync(path.join(tmp,name)));
     assert.ok(fs.existsSync(path.join(tmp,'index.html')));

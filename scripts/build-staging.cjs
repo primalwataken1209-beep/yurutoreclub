@@ -3,7 +3,9 @@ const path=require('node:path');
 const assert=require('node:assert/strict');
 function build(output,env=process.env){
   assert.ok(['deploy-preview','branch-deploy','offline-test'].includes(env.CONTEXT),'Only staging preview builds are permitted');
-  assert.equal(env.BRANCH,'staging/isolated-test-app','Unexpected source branch');
+  // Netlify uses BRANCH=pull/5/head for previews; HEAD names the source branch.
+  const sourceBranch=env.CONTEXT==='deploy-preview'?env.HEAD:env.BRANCH;
+  assert.equal(sourceBranch,'staging/isolated-test-app','Unexpected source branch');
   const root=path.resolve(__dirname,'..');
   const out=path.resolve(output||path.join(root,'staging-dist'));
   assert.notEqual(out,root);

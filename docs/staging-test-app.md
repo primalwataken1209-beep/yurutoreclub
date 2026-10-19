@@ -42,7 +42,7 @@ Supabase側のSite URL / Redirect URLs保存は管理画面へのログイン後
 新規Netlifyプロジェクト・ドメイン・有料オプション・Secretsを作らない。
 既存サイトのDeploy Previewで本番とは別のURLを使用する。PR #5の比較先mainはプレビュー検出用で、mainのコードを変更するものではない。PRはマージ禁止。
 
-ビルドには`CONTEXT=deploy-preview`と`BRANCH=staging/isolated-test-app`が必要。
+ビルドには`CONTEXT=deploy-preview`と`HEAD=staging/isolated-test-app`が必要。NetlifyのPRビルドでは`BRANCH=pull/5/head`となるため、ソースブランチは`HEAD`で確認する。
 production contextやmainからのビルドは拒否する。SQL・テスト・履歴資料は配信しない。
 本番サイト全体の設定、Production branch、環境変数、既存Secretsは変更しない。
 プレビューの実URL確定後、stagingのSite URLとRedirect URLsに同じURLを完全一致で登録する。
