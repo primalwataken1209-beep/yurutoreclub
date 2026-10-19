@@ -4,6 +4,10 @@
 # 画像などの assets は今までどおり長期キャッシュしてよい（表示は速いまま）。
 /*
   Cache-Control: public, max-age=0, must-revalidate
+  X-Robots-Tag: noindex, nofollow
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://knftduojdalnawvkbelt.supabase.co; font-src 'self'; connect-src https://knftduojdalnawvkbelt.supabase.co wss://knftduojdalnawvkbelt.supabase.co; worker-src 'none'
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

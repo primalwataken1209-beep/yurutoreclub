@@ -251,20 +251,18 @@ reports / blocks / RLS / 13歳以上確認 / SNS通報 / SNSブロック / Auth�
 
 ---
 
-## ⚠️ 公開前に必ずやること（この4つが終わるまで本番公開完成ではありません）
+## ⚠️ 公開前に必ずやること
 
-| # | 項目 | 場所 |
-|---|------|------|
-| 1 | `[OPERATOR_NAME]` を正式なサービス運営者名へ置換 | `legal/legal.js` の `YT_LEGAL_CONFIG.OPERATOR_NAME`（**1か所だけ**） |
-| 2 | `[SUPPORT_EMAIL]` を実際に受信できる問い合わせ先へ置換 | `legal/legal.js` の `YT_LEGAL_CONFIG.SUPPORT_EMAIL`（**1か所だけ**） |
-| 3 | Edge Function の deploy と secret 設定 | 下記「Edge Function の deploy」 |
-| 4 | SQL マイグレーションの実行 | 下記「SQL マイグレーション」 |
+| # | 項目 | 場所 | 状態 |
+|---|------|------|------|
+| 1 | 運営者名の設定 | `legal/legal.js` の `YT_LEGAL_CONFIG.OPERATOR_NAME_JA / _EN` | ✅ v51.1で設定済み |
+| 2 | 問い合わせ先メールの設定 | `legal/legal.js` の `YT_LEGAL_CONFIG.SUPPORT_EMAIL` | ✅ v51.1で設定済み |
+| 3 | Edge Function の deploy と secret 設定 | 下記「Edge Function の deploy」 | 未 |
+| 4 | SQL マイグレーションの実行 | 下記「SQL マイグレーション」 | 未 |
 
 5つのリーガルページ（privacy / terms / community-guidelines / account-deletion / contact）は
 すべて `legal/legal.js` から値を差し込んでいます。**HTMLを1枚ずつ書き換える必要はありません。**
-
-置換前の状態では、問い合わせ先が `[SUPPORT_EMAIL]` と表示され、`mailto:` リンクは張られません
-（誤送信を防ぐため意図的にそうしています）。
+（v51.1以降はHTML側にも同じ正式値を静的に書いてあるため、JSが動かない環境でも正しく表示されます。）
 
 ---
 
@@ -509,7 +507,7 @@ v50 の「通報」「ブロック」を中心にしています。
 - 5ページすべてが日本語で表示される
 - 5ページすべてが English に切り替わり、切替後は日本語ブロックが非表示になる
 - **英語版に日本語の取り残しがない**（本文を機械的に走査して確認）
-- `[OPERATOR_NAME]` / `[SUPPORT_EMAIL]` が `legal.js` から正しく差し込まれる
+- 運営者名 / 問い合わせ先が `legal.js` から正しく差し込まれる
 
 ### 回帰テスト（実ブラウザ / 体験版導線）
 
