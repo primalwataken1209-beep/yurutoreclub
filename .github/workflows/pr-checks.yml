@@ -6,7 +6,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   # Bootstrap verification without changing main or deploying production.
   push:
-    branches: [ci/offline-pr-checks, ci/offline-browser-checks, fix/v51-4-5-integration]
+    branches: [ci/offline-pr-checks, ci/offline-browser-checks, fix/v51-4-5-integration, release/v51-4-7-preflight]
 
 permissions:
   contents: read

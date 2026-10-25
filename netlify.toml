@@ -1,0 +1,4 @@
+# Preparation branch only. Prevent any Netlify branch/preview/production publish.
+[build]
+  command = "node scripts/block-preflight-deploy.cjs"
+

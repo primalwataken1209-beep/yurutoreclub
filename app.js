@@ -2635,18 +2635,143 @@ function dataUrlToBlob(dataUrl){
   return new Blob([arr],{type:mime});
 }
 
+/* v51.4.7: Private avatars; authenticated downloads and viewer-scoped caches. */
+const AVATAR_BUCKET='avatars';
+const AVATAR_UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const AVATAR_REF_RE=new RegExp('^avatars/('+AVATAR_UUID+')/avatar\\.jpg(?:\\?v=([0-9]{1,16}))?$');
+const AVATAR_CACHE_MS=5*60*1000;        // 取得できた画像を使い回す時間（過ぎたら RLS で再判定）
+const AVATAR_FAIL_MS=10*60*1000;        // 取得できなかった画像を再試行しない時間
+const AVATAR_BLOBS={};                  // key -> {url, exp}（メモリ上だけ）
+const AVATAR_FAILS={};                  // key -> 再試行してよい時刻
+const AVATAR_PENDING={};                // key -> Promise（同じ画像の同時取得をまとめる）
+/* 【v51.4.7追加修正】キャッシュは「見ている人（ログイン中のユーザー）」ごと。
+   key は「閲覧者ID#画像パス|版」。閲覧者が変わったら（ログアウト・別ユーザーでログイン）全部捨てる。 */
+const AVATAR_STATE={viewer:null,gen:0,listeners:new Set()};
+function avatarResetCache(viewer){
+  const v=viewer||null;
+  if(v===AVATAR_STATE.viewer)return;
+  AVATAR_STATE.viewer=v; AVATAR_STATE.gen++;
+  Object.keys(AVATAR_BLOBS).forEach(k=>{ try{URL.revokeObjectURL(AVATAR_BLOBS[k].url);}catch(_){} delete AVATAR_BLOBS[k]; });
+  Object.keys(AVATAR_FAILS).forEach(k=>{ delete AVATAR_FAILS[k]; });
+  Object.keys(AVATAR_PENDING).forEach(k=>{ delete AVATAR_PENDING[k]; });
+  AVATAR_STATE.listeners.forEach(fn=>{ try{fn();}catch(_){} });   // 表示中の画像を外して取り直させる
+}
+/* avatar_url の値から Storage 上のパスを取り出す。対象外の値は null。 */
+function avatarRefFromValue(v){
+  if(typeof v!=='string'||!v)return null;
+  let m=v.match(AVATAR_REF_RE);
+  if(!m){
+    const pre=SUPABASE_URL+'/storage/v1/object/public/avatars/';
+    if(v.indexOf(pre)!==0)return null;
+    m=('avatars/'+v.slice(pre.length)).match(AVATAR_REF_RE);
+    if(!m)return null;
+  }
+  return {path:m[1]+'/avatar.jpg', uid:m[1], key:m[1]+'/avatar.jpg|'+(m[2]||'')};
+}
+/* 画像本体を取得する。戻り値 {url, exp}：url は blob URL（取得できなければ null＝既定アイコン）、
+   exp はこの結果を使ってよい期限（成功＝キャッシュ期限、失敗＝再試行してよい時刻）。 */
+async function loadAvatarEntry(value){
+  const ref=avatarRefFromValue(value);
+  if(!ref||!supabaseClient)return {url:null,exp:0};
+  // 閲覧者は「ダウンロードに使われるセッション」と同じものから決める
+  let viewer=null;
+  try{ const {data}=await supabaseClient.auth.getSession(); viewer=(data&&data.session&&data.session.user&&data.session.user.id)||null; }catch(_){}
+  avatarResetCache(viewer);
+  if(!viewer)return {url:null,exp:0};                     // 未ログインでは取得しない
+  const gen=AVATAR_STATE.gen;
+  const key=viewer+'#'+ref.key;
+  const now=Date.now();
+  const hit=AVATAR_BLOBS[key];
+  if(hit&&hit.exp>now)return {url:hit.url,exp:hit.exp};
+  if(AVATAR_FAILS[key]&&AVATAR_FAILS[key]>now)return {url:null,exp:AVATAR_FAILS[key]};
+  if(AVATAR_PENDING[key])return AVATAR_PENDING[key];
+  const job=(async()=>{
+    try{
+      const {data,error}=await supabaseClient.storage.from(AVATAR_BUCKET).download(ref.path);
+      if(error||!data)throw error||new Error('no data');
+      if(gen!==AVATAR_STATE.gen)return {url:null,exp:0};    // 取得中に閲覧者が変わった → 破棄
+      if(hit&&hit.url){ try{URL.revokeObjectURL(hit.url);}catch(_){} }
+      const url=URL.createObjectURL(data);
+      const exp=Date.now()+AVATAR_CACHE_MS;
+      AVATAR_BLOBS[key]={url,exp};
+      delete AVATAR_FAILS[key];
+      return {url,exp};
+    }catch(e){
+      if(gen!==AVATAR_STATE.gen)return {url:null,exp:0};
+      if(hit&&hit.url){ try{URL.revokeObjectURL(hit.url);}catch(_){} }
+      delete AVATAR_BLOBS[key];
+      const exp=Date.now()+AVATAR_FAIL_MS;
+      AVATAR_FAILS[key]=exp;
+      return {url:null,exp};
+    }finally{ if(gen===AVATAR_STATE.gen)delete AVATAR_PENDING[key]; }
+  })();
+  AVATAR_PENDING[key]=job;
+  return job;
+}
+async function loadAvatarSrc(value){ return (await loadAvatarEntry(value)).url; }
+/* 本人の画面でだけ使う画像（端末内の dataURL、または本人の外部URL）。他人の表示には渡さない。 */
+function selfAvatarLocal(user){
+  if(!user)return null;
+  if(user.avatar)return user.avatar;
+  const u=user.avatarUrl;
+  return (typeof u==='string'&&/^https:\/\//.test(u)&&!avatarRefFromValue(u))?u:null;
+}
+/* 表示用フック。local（本人の端末画像）があればそれを優先し、通信しない。
+   【v51.4.7追加修正】表示中も、結果の期限（成功＝キャッシュ期限／失敗＝再試行時刻）が来たら取り直す。
+   非公開に切り替わっていれば、その時点で画像を外して既定アイコンにする。
+   初回表示でキャッシュを同期的に読まない（閲覧者の確認前に別の人のキャッシュを出さないため）。 */
+function useAvatarSrc(value,local){
+  const ref=local?null:avatarRefFromValue(value);
+  const [src,setSrc]=useState(null);
+  const [tick,setTick]=useState(0);
+  useEffect(()=>{
+    const onReset=()=>{ setSrc(null); setTick(n=>n+1); };
+    AVATAR_STATE.listeners.add(onReset);
+    return()=>{ AVATAR_STATE.listeners.delete(onReset); };
+  },[]);
+  useEffect(()=>{
+    if(local||!ref){setSrc(null);return;}
+    let alive=true, timer=null;
+    loadAvatarEntry(value).then(r=>{
+      if(!alive)return;
+      setSrc(r.url);
+      if(r.exp>0)timer=setTimeout(()=>{ if(alive)setTick(n=>n+1); },Math.max(1000,r.exp-Date.now()+50));
+    });
+    return()=>{alive=false; if(timer)clearTimeout(timer);};
+  },[value,local,tick]);
+  return local||src||null;
+}
+/* 繰り返し表示（一覧）用の小さな部品。取得できなければ fallback を表示する。 */
+function SnsAvatar({value,local,className,style,fallback}){
+  const src=useAvatarSrc(value,local);
+  return src?<img src={src} className={className} style={style} alt=""/>:fallback;
+}
+
 // プロフィール画像をSupabase Storage（avatarsバケット）へアップロードする。
 // バケット未作成・未ログイン時は null を返し、アプリ側はローカル画像(dataURL)で動き続ける。
+// 【v51.4.7】公開URLは取得・保存しない。戻り値は参照「avatars/{uid}/avatar.jpg?v=時刻」。
 async function uploadAvatarToSupabase(userId,dataUrl){
   try{
     if(!supabaseClient||!userId||userId==='guest'||!dataUrl)return null;
     const blob=dataUrlToBlob(dataUrl);
     const path=`${userId}/avatar.jpg`; // 本人フォルダ配下のみ書き込み可（RLSで制限）
-    const {error}=await supabaseClient.storage.from('avatars').upload(path,blob,{upsert:true,contentType:'image/jpeg'});
+    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).upload(path,blob,{upsert:true,contentType:'image/jpeg'});
     if(error)return null;
-    const {data}=supabaseClient.storage.from('avatars').getPublicUrl(path);
-    return (data&&data.publicUrl)?`${data.publicUrl}?v=${Date.now()}`:null;
+    const ref=`avatars/${path}?v=${Date.now()}`;
+    return avatarRefFromValue(ref)?ref:null;
   }catch(e){return null;}
+}
+/* 【v51.4.7】プロフィール画像の削除。Storage のファイルも消す（参照を外すだけにしない）。
+   成功（ファイルが元から無い場合を含む）なら true。失敗なら false（呼び出し元は保存を中止する）。 */
+async function removeAvatarFromSupabase(userId){
+  try{
+    if(!supabaseClient||!userId||userId==='guest')return true;
+    const path=`${userId}/avatar.jpg`;
+    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).remove([path]);
+    if(error)return false;
+    Object.keys(AVATAR_BLOBS).forEach(k=>{ if(k.indexOf('#'+path+'|')>=0){ try{URL.revokeObjectURL(AVATAR_BLOBS[k].url);}catch(_){} delete AVATAR_BLOBS[k]; } });
+    return true;
+  }catch(e){return false;}
 }
 
 // プロフィールをSupabaseのprofilesテーブルへ保存する（将来の他ユーザー表示用）。
@@ -3709,6 +3834,7 @@ function AppLogic({devId}){
       .finally(()=>{ if(alive)setAuthChecked(true); });
     const {data:{subscription}}=supabaseClient.auth.onAuthStateChange((_event,nextSession)=>{
       if(!alive)return;
+      avatarResetCache(nextSession&&nextSession.user&&nextSession.user.id);   // 【v51.4.7】別の人の画像キャッシュを持ち越さない
       setSession(nextSession||null);
       setAuthChecked(true);
       if(nextSession)cleanAuthUrl();
@@ -8760,9 +8886,8 @@ function BlockedUsersPanelV50({state,showToast}){
             return(
               <div key={r.blocked_id} style={{display:'flex',alignItems:'center',gap:9,padding:'8px 0',
                                               borderTop:'1px solid #f0f7f5'}}>
-                {p&&p.avatar_url
-                  ?<img src={p.avatar_url} className="avatar" style={{objectFit:'cover'}} alt=""/>
-                  :<div className="avatar" style={{background:snsColorOf(r.blocked_id)}}>{snsInitial(p,nm)}</div>}
+                <SnsAvatar value={p&&p.avatar_url} className="avatar" style={{objectFit:'cover'}}
+                  fallback={<div className="avatar" style={{background:snsColorOf(r.blocked_id)}}>{snsInitial(p,nm)}</div>}/>
                 <div style={{flex:1,minWidth:0,fontSize:13,fontWeight:700,color:'#1a4038',
                              overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{nm}</div>
                 <button type="button" disabled={busyId===r.blocked_id} onClick={()=>unblock(r.blocked_id)}
@@ -9059,7 +9184,9 @@ function SnsPostCard({post,me,state,author,initialReactions,initialCommentCount,
   const [blockErr,setBlockErr]=useState('');
 
   const name=snsDisplayName(author,isMine?(state.user&&state.user.name):null);
-  const avatar=(author&&author.avatar_url)||(isMine&&state.user&&(state.user.avatarUrl||state.user.avatar))||null;
+  /* 【v51.4.7】他人の画像は Storage から権限つきで取得（取得不可なら既定アイコン）。本人は端末の画像を優先 */
+  const avatar=useAvatarSrc((author&&author.avatar_url)||(isMine&&state.user&&state.user.avatarUrl)||null,
+                            isMine?selfAvatarLocal(state.user):null);
 
   const toggle=async(r)=>{
     if(busyType)return;
@@ -9294,7 +9421,9 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
   };
 
   const name=snsDisplayName(prof,isMe?(state.user&&state.user.name):null);
-  const avatar=(prof&&prof.avatar_url)||(isMe&&state.user&&(state.user.avatarUrl||state.user.avatar))||null;
+  /* 【v51.4.7】他人の画像は Storage から権限つきで取得（取得不可なら既定アイコン）。本人は端末の画像を優先 */
+  const avatar=useAvatarSrc((prof&&prof.avatar_url)||(isMe&&state.user&&state.user.avatarUrl)||null,
+                            isMe?selfAvatarLocal(state.user):null);
 
   return(
     <div className="room-full-view">
@@ -9641,7 +9770,14 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
       if(avatarChanged&&avatar){
         // ログイン中ならSupabase Storageへアップロード（失敗してもdataURLで表示継続）
         avatarUrl=await uploadAvatarToSupabase(state.auth,avatar);
-      }else if(!avatar){avatarUrl=null;}
+      }else if(!avatar){
+        // 【v51.4.7】画像を消したときは Storage のファイルも削除する。失敗したら保存しない（再試行できる）。
+        if((state.user.avatar||state.user.avatarUrl)&&!(await removeAvatarFromSupabase(state.auth))){
+          setAvatarErr(t('photo.saveErr'));
+          return;
+        }
+        avatarUrl=null;
+      }
       const nextUser={...state.user,
         name:name.trim(),bio:bio.trim(),intro:intro.trim(),
         avatar:avatar||null,avatarUrl,
