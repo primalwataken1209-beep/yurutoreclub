@@ -35,7 +35,7 @@
 //     が、本当に削除に失敗した場合は成功にしない
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.118.0';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -283,3 +283,4 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ ok: false, step: 'unexpected', error: String(e) }, 500);
   }
 });
+

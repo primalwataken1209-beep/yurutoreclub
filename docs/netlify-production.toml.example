@@ -1,0 +1,14 @@
+# REVIEW DRAFT ONLY: do not copy to netlify.toml before explicit release approval.
+# Requires scripts/build-public.cjs and a validated fixed source commit.
+[build]
+  command = "node scripts/block-preflight-deploy.cjs"
+  publish = "dist"
+
+[context.production]
+  command = "node scripts/build-public.cjs"
+
+[context.deploy-preview]
+  command = "node scripts/block-preflight-deploy.cjs"
+
+[context.branch-deploy]
+  command = "node scripts/block-preflight-deploy.cjs"
