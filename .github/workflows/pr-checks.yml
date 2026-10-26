@@ -1,0 +1,160 @@
+name: PR offline checks
+
+on:
+  # The launcher comes from the trusted base/default revision, not the PR.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Bootstrap verification without changing main or deploying production.
+  push:
+    branches: [ci/offline-pr-checks, ci/offline-browser-checks, fix/v51-4-5-integration, staging/isolated-test-app]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-checks:
+    name: Static, smoke and security (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Official Node 22 image, pinned to the digest verified during bootstrap.
+      TEST_IMAGE: node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+      BROWSER_IMAGE: mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+    steps:
+      - name: Check out trusted checks
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: trusted-checks
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: pr-source
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Prepare isolated inputs and fresh reports
+        run: |
+          work_dir="$(mktemp -d "$RUNNER_TEMP/yurutore-ci.XXXXXX")"
+          chmod 0755 "$work_dir"
+          mkdir "$work_dir/dependencies" "$work_dir/browser-tools" "$work_dir/reports"
+          # This is the only writable host mount given to the installer.
+          chmod 0777 "$work_dir/dependencies" "$work_dir/browser-tools"
+          for file in package.json package-lock.json; do
+            source_file="$GITHUB_WORKSPACE/trusted-checks/$file"
+            test -f "$source_file" && test ! -L "$source_file"
+            cp -- "$source_file" "$work_dir/dependencies/$file"
+          done
+          cp -- "$GITHUB_WORKSPACE/trusted-checks/browser-tests/tools/package.json" "$work_dir/browser-tools/package.json"
+          echo "OFFLINE_WORK_DIR=$work_dir" >> "$GITHUB_ENV"
+          docker pull "$TEST_IMAGE"
+          docker pull "$BROWSER_IMAGE"
+          docker image inspect --format '{{index .RepoDigests 0}}' "$BROWSER_IMAGE"
+      - name: Install dependencies without executing PR code
+        run: |
+          container_name="offline-deps-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true' EXIT
+          # Bash ulimit -f is KiB: at most 10 MiB per host report file.
+          ulimit -f 10240
+          docker run --rm --name "$container_name" --log-driver none --user 65534:65534 \
+            --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --pids-limit 128 --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --mount "type=bind,source=$OFFLINE_WORK_DIR/dependencies,target=/deps" \
+            --workdir /deps --env HOME=/tmp --env TMPDIR=/tmp \
+            "$TEST_IMAGE" npm ci --ignore-scripts --no-audit --no-fund \
+            > "$OFFLINE_WORK_DIR/reports/install.log" 2>&1
+          docker run --rm --name "$container_name" --log-driver none --user 65534:65534 \
+            --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --pids-limit 128 --memory 2g --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --mount "type=bind,source=$OFFLINE_WORK_DIR/browser-tools,target=/deps" \
+            --workdir /deps --env HOME=/tmp --env TMPDIR=/tmp \
+            "$TEST_IMAGE" npm install --ignore-scripts --no-audit --no-fund \
+            > "$OFFLINE_WORK_DIR/reports/browser-install.log" 2>&1
+      - name: Run checks in an isolated container
+        id: tests
+        run: |
+          host_netns="$(readlink /proc/self/ns/net)"
+          container_name="offline-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true' EXIT
+          ulimit -f 10240
+          docker run --rm --name "$container_name" --log-driver none --network none --user 65534:65534 \
+            --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --pids-limit 128 --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pr-source,target=/workspace,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/trusted-checks,target=/harness,readonly" \
+            --mount "type=bind,source=$OFFLINE_WORK_DIR/dependencies/node_modules,target=/opt/deps/node_modules,readonly" \
+            --workdir /workspace --env HOME=/tmp --env TMPDIR=/tmp \
+            --env NODE_PATH=/opt/deps/node_modules \
+            "$TEST_IMAGE" node /harness/scripts/run-offline-tests.cjs "$host_netns" \
+            > "$OFFLINE_WORK_DIR/reports/tests.tap" 2>&1
+      - name: Run real browser checks offline
+        id: browser
+        run: |
+          host_netns="$(readlink /proc/self/ns/net)"
+          container_name="offline-browser-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true' EXIT
+          ulimit -f 10240
+          docker run --rm --init --name "$container_name" --log-driver none --network none --user 65534:65534 \
+            --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --security-opt "seccomp=$GITHUB_WORKSPACE/trusted-checks/browser-tests/seccomp_profile.json" \
+            --pids-limit 256 --memory 3g --shm-size 256m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pr-source,target=/workspace,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/trusted-checks,target=/harness,readonly" \
+            --mount "type=bind,source=$OFFLINE_WORK_DIR/dependencies/node_modules,target=/opt/deps/node_modules,readonly" \
+            --mount "type=bind,source=$OFFLINE_WORK_DIR/browser-tools/node_modules,target=/opt/browser-tools/node_modules,readonly" \
+            --workdir /workspace --env HOME=/tmp --env TMPDIR=/tmp \
+            --env NODE_PATH=/opt/deps/node_modules:/opt/browser-tools/node_modules \
+            "$BROWSER_IMAGE" node /harness/scripts/run-offline-tests.cjs "$host_netns" --browser \
+            > "$OFFLINE_WORK_DIR/reports/browser.tap" 2>&1
+      - name: Extract browser screenshots as data
+        if: always() && env.OFFLINE_WORK_DIR != ''
+        env:
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+        run: |
+          arguments=()
+          if [ "$BROWSER_OUTCOME" = success ]; then arguments+=(--require-complete); fi
+          python3 "$GITHUB_WORKSPACE/trusted-checks/scripts/extract-browser-images.py" "$OFFLINE_WORK_DIR/reports" "${arguments[@]}"
+      - name: Report results
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+        run: |
+          {
+            echo '## ゆるトレ倶楽部 PR検証'
+            echo "対象コミット: $TEST_SHA"
+            echo "検証結果: ${TEST_OUTCOME:-未実行}"
+            echo "実ブラウザ検証: ${BROWSER_OUTCOME:-未実行}"
+            echo '対象: JSX・日英辞書・体験版画面・ローカルRLS・投稿写真削除・退会時Storage障害'
+            echo '本番DB接続なし。Secrets不要。デプロイ・マージは実行しません。'
+            echo '詳細は offline-test-report artifact を参照してください。'
+          } >> "$GITHUB_STEP_SUMMARY"
+          report_token="$(cat /proc/sys/kernel/random/uuid)"
+          echo "::stop-commands::$report_token"
+          if [ -n "${OFFLINE_WORK_DIR:-}" ]; then
+            for file in install.log browser-install.log tests.tap browser.tap; do
+              if [ -f "$OFFLINE_WORK_DIR/reports/$file" ]; then sed '/# BROWSER_IMAGE /d' "$OFFLINE_WORK_DIR/reports/$file"; fi
+            done
+          fi
+          echo "::$report_token::"
+      - name: Save test report
+        if: always() && env.OFFLINE_WORK_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: offline-test-report
+          path: ${{ env.OFFLINE_WORK_DIR }}/reports/
+          if-no-files-found: warn
+          retention-days: 14

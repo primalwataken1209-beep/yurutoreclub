@@ -86,6 +86,7 @@
   <ul>
     <li>プロフィール画像（ログイン中の場合、Supabase Storage の avatars 領域に保存されます）</li>
     <li>運動記録に添付した写真（現在の実装では、利用者の端末内にのみ保存されます）</li>
+    <li>SNS投稿に添付した写真（利用者がSNSへの投稿を選択した場合に限り、Supabase Storage に保存されます）</li>
   </ul>
 
   <h2>3. 利用目的</h2>
@@ -129,7 +130,9 @@
   <h2>8. 画像</h2>
   <p>
     プロフィール画像は、ログイン中の場合、Supabase Storage の avatars 領域に保存され、SNS機能上で他の利用者に表示されます。
-    運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、サーバーへ送信されません。
+    運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、運動記録を保存しただけではサーバーへ送信されません。
+    ただし、利用者がその写真を含めてSNSへ投稿することを選択した場合、またはSNSの投稿に写真を添付した場合、その写真はSNS機能を提供するためにサーバー（Supabase Storage）へ送信・保存され、投稿と同じ範囲の他の利用者に表示されます。
+    送信される写真は、アプリ内で縮小・再変換されたものです。投稿を削除した場合やアカウントを削除した場合、その投稿に添付した写真も削除されます。
   </p>
 
   <h2>9. 端末内に保存される情報</h2>
@@ -234,7 +237,7 @@
 
   <h2>20. 制定日・改定日</h2>
   <p>制定日：2026年9月8日</p>
-  <p>最終改定日：2026年9月8日</p>
+  <p>最終改定日：2026年9月16日</p>
 </section>
 
 <!-- ═══════════════════ English ═══════════════════ -->
@@ -300,6 +303,7 @@
   <ul>
     <li>Profile photo (when you are signed in, it is stored in the avatars area of Supabase Storage)</li>
     <li>Photos attached to activity logs (in the current implementation these stay on your own device)</li>
+    <li>Photos attached to community posts (stored in Supabase Storage only when you choose to post them to the community)</li>
   </ul>
 
   <h2>3. How we use this information</h2>
@@ -342,7 +346,9 @@
   <h2>8. Images</h2>
   <p>
     When you are signed in, your profile photo is stored in the avatars area of Supabase Storage and is shown to other members in the community feature.
-    Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers.
+    Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers just because you save a log.
+    However, if you choose to share a log together with its photo in the community, or attach a photo to a community post, that photo is sent to and stored on our servers (Supabase Storage) so the community feature can work, and it is shown to the same members who can see the post.
+    Photos are resized and re-encoded in the app before they are sent. If you delete the post or your account, the photo attached to that post is deleted as well.
   </p>
 
   <h2>9. Information stored on your device</h2>
@@ -439,7 +445,7 @@
 
   <h2>20. Dates</h2>
   <p>Effective date: September 8, 2026</p>
-  <p>Last updated: September 8, 2026</p>
+  <p>Last updated: September 16, 2026</p>
 </section>
 
 <footer class="lg-footer">
