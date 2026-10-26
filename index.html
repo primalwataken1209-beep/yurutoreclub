@@ -1947,21 +1947,10 @@ html[lang="en"] .home-cta-title{letter-spacing:-.01em;}
   ─────────────────────────────────────────────────────────
 -->
 <script type="text/babel" data-presets="env,react">
+/* app.js — index.html のインラインと同一（v51.4.2 パスワード8文字（新規登録のみ））本番は inline 版。 */
 const {useState,useEffect,useRef,createContext,useContext}=React;
 
-/* ═══════════════ 【v48新規追加】多言語(i18n)基盤 ═══════════════
-   目的: 英語版を別アプリにせず、1つのアプリの中で日本語／英語を切り替える。
-         将来 ko / zh / es を足すときも、I18N に言語キーを1つ増やすだけで済む。
 
-   設計:
-     ・表示文字列は I18N の辞書に置き、画面側は t('welcome.ctaStart') で引く
-     ・未翻訳のキーは自動で日本語へフォールバックする(画面が空にならない)
-     ・言語は localStorage の 'yurutore_language' にだけ保存する
-       (既存のキーは1つも変更・削除していない)
-     ・言語が変わったら購読者へ通知し、アプリ全体を再描画する(リロード不要)
-
-   優先順位(§6): ①ユーザーが選んだ保存済み言語 → ②端末の言語 → ③en
-   ═══════════════════════════════════════════════════════════════ */
 const YT_LANG_KEY='yurutore_language';     // ← v48で新規に増えた唯一のキー
 const YT_LANGS=['ja','en'];                // 将来ここに 'ko','zh' などを足せる
 function ytDetectLang(){
@@ -2604,20 +2593,16 @@ en:{
 // Service Role Key（秘密鍵）は絶対にフロントエンドのコードに書かないでください。
 const SUPABASE_URL='https://eszheiabjwehcbrteqza.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_XINCdNEKIrUVQJY8tZlOPw_wp8eJ7CW';
+// Capture recovery intent before the SDK consumes the callback URL. No tokens are stored.
+const YT_RECOVERY_RETURN=(()=>{try{return new URLSearchParams(location.hash.slice(1)).get('type')==='recovery';}catch(e){return false;}})();
+function ytRecoveryRemember(uid){try{if(uid)sessionStorage.setItem('yt-password-recovery-user',uid);else sessionStorage.removeItem('yt-password-recovery-user');}catch(e){}}
+function ytRecoveryPending(uid){try{return !!uid&&sessionStorage.getItem('yt-password-recovery-user')===uid;}catch(e){return false;}}
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-/* ═══════════════ 【v43.1】認証の戻り先URL ═══════════════
-   GoogleログインやパスワードGoogle再設定のあと、どこへ戻すかをここ1か所で決める。
-   本番は必ず公開URLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
-   ローカル開発(localhost / 127.0.0.1 / file://)のときだけ、いま開いている場所へ戻す。 */
+
 const APP_PUBLIC_URL='https://yurutore-club.netlify.app/';
 
-/* ═══════════════ 【v50新規追加】リーガル設定 ═══════════════
-   公開ページ（/privacy/ など）は静的HTMLで、legal/legal.js に同じ設定がある。
-   アプリ側から参照するのはリンク先URLだけ。
-   ★ 運営者名 / 問い合わせ先の PLACEHOLDER は legal/legal.js の
-     YT_LEGAL_CONFIG が正（1か所）。公開前に必ず差し替えること。
-     詳細は README_v50_legal_safety.md を参照。 */
+
 const LEGAL_URLS={
   terms:'/terms/',
   privacy:'/privacy/',
@@ -2677,11 +2662,7 @@ function validateAuthInput(email,pass,mode){
   if(!e) return t('msg.emailRequired');
   if(!isValidEmail(e)) return t('msg.emailInvalid');
   if(!p) return t('msg.passRequired');
-  /* 【v51.4.2】8文字以上のチェックは「新規登録」のときだけ行う。
-     ・新規登録 … Supabase本番の Minimum password length = 8 に合わせて、送信前に止める
-     ・ログイン … 文字数では弾かない。6〜7文字のパスワードを使っている既存ユーザーが
-                  今までどおりログインできるようにするため（正否の判定はSupabaseに任せる）
-     mode を渡さずに呼んだ場合は、安全側（8文字以上を必須）として扱う。 */
+  
   if(mode!=='login' && p.length<8) return t('msg.passShort');
   return null;
 }
@@ -4157,11 +4138,7 @@ function pickPraiseMessage(aid){
 
 
 
-/* ═══════════════ 【v38新規追加】パンジローの全力リアクション ═══════════════
-   運動を記録した瞬間に「パンジローが全力で褒めに来る」ための定義。
-   ・新しい保存データ・localStorageキーは一切増やしていません（すべてその場で抽選）
-   ・文章は1〜3行の短文のみ。責める/煽る/比較する表現は入れません
-   ・anim は CSS の .pj-a-* に対応（transform中心の軽量アニメ）                */
+
 
 /* 通常リアクション（7種） */
 const PJ_NORMAL=[
@@ -4227,22 +4204,13 @@ const PJ_MILESTONES={
   100:{id:'m100',anim:'crown', pose:'happy',tag:'100日',confetti:true,props:{top:'👑'},lines:['100回。','言葉にならないよ🐼'],lines_en:['One hundred.','I have no words 🐼']},
 };
 
-/* 【v38.1新規追加】リアクション専用のパンジロー素材。
-   部屋用(assets/panda-room/v30/panda30_*.webp)は1536x1024の部屋レイヤーで、
-   パンダ本体が画面幅の約16%しかないため大きく表示できなかった。
-   ここでは本体だけを切り出した軽量素材(合計約98KB)を使う。
-   読み込めない場合は normal → 絵文字🐼 の順に安全にフォールバックする。 */
+
 const PJ38_DIR='assets/panda-room/v38/';
 const PJ38={normal:'pj38_normal.webp',happy:'pj38_happy.webp',sleepy:'pj38_sleepy.webp',ramen:'pj38_ramen.webp'};
 /* ※v38素材は削除していない。万一v51の見た目に問題が出たときは、
    PraiseScreen の PJ51_DIR / PJ51 を PJ38_DIR / PJ38 に戻すだけで元に戻せる。 */
 
-/* ═══════════════ 【v51新規追加】リアクション版パンジロー（淡いベージュTシャツ） ═══════════════
-   位置づけ: パンダルームのいつものパンジローが、運動記録を褒めるときだけTシャツに着替えた姿。
-   ・6ポーズ: normal / happy / guts / stretch / sleepy / ramen（背景透過WebP）
-   ・リアクションの抽選・セリフ・i18n・表示時間・CSSアニメーションは変更していない。
-     変えたのは「どのリアクションでどの画像を出すか」だけ。
-   ・読み込めない場合は normal → 絵文字🐼 の順に安全にフォールバックする（v38と同じ挙動）。 */
+
 const PJ51_DIR='assets/panda-room/v51/';
 const PJ51={normal:'pj51_normal.webp',happy:'pj51_happy.webp',guts:'pj51_guts.webp',
             stretch:'pj51_stretch.webp',sleepy:'pj51_sleepy.webp',ramen:'pj51_ramen.webp'};
@@ -4374,11 +4342,7 @@ const suggestReactions=(post,act)=>{
   return list.slice(0,5).map(getReaction);
 };
 
-/* ═══════════════ 【v43変更】ダミー投稿は本番から除外 ═══════════════
-   v42まではこのサンプルがタイムラインに混ざって表示されていたが、
-   v43で「実ユーザーの実投稿だけを出す」ようにしたため本番描画からは外した。
-   参照しているのは DevSnsDemo（?debug=sns のときだけ描画）だけで、
-   本番のタイムラインからは一切読まれない。削除はせず、開発用として残している。 */
+
 const DEV_SAMPLE_USERS=[
   {id:'u1',name:'みちこ', initial:'み',color:'#5DCBA8'},
   {id:'u2',name:'けんさん',initial:'け',color:'#6baed6'},
@@ -4742,35 +4706,12 @@ async function syncProfileToSupabase(userId,user){
   }catch(e){/* テーブル未作成などは無視（既存動作に影響させない） */}
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   【v43新規追加】実ユーザーSNS基盤 — Supabaseアクセス層
 
-   ここだけがSupabaseのSNSテーブルに触れる。画面(JSX)からSQLを直接書かない。
-   使うテーブルは supabase/migrations/20260101000000_v43_real_sns.sql で作る:
-     profiles / posts / post_reactions / comments / follows
-
-   方針:
-   ・認証は既存のSupabase認証をそのまま使う。新しい認証方式は作らない。
-     SNSのユーザーIDは常に auth.uid()（＝アプリ側の state.auth）。
-   ・戻り値は必ず {data, error} の形。error は「ユーザーに見せる日本語」。
-     画面側は error を出して再試行ボタンを見せるだけでよい（§17）。
-   ・埋め込み(select の join)は使わず、必要なテーブルを個別に引く。
-     マイグレーション直後にPostgRESTのスキーマキャッシュが古いと
-     join構文が失敗することがあるため、確実に動くほうを選んでいる。
-   ═══════════════════════════════════════════════════════════════════════════ */
 const SNS_PAGE_SIZE=30;              // タイムライン1ページの件数
 const SNS_POST_MAX=300;              // 投稿本文の上限(DBのCHECKと同じ)
 const SNS_COMMENT_MAX=200;           // コメントの上限(DBのCHECKと同じ)
 
-/* ═══════════════ 【v51.2新規追加】SNS投稿写真（1投稿につき最大1枚） ═══════════════
-   ・保存先は Supabase Storage の private バケット「post-images」
-     パスは {自分のuser_id}/{ランダムuuid}.jpg。DBの posts.image_path にはこのパスだけを保存する
-     （公開URLは保存しない。表示のたびに期限付きの署名URLを発行する）
-   ・誰が見られるかは Storage の RLS が決める（本人／公開アカウントの削除されていない投稿のみ）
-   ・画像はブラウザで長辺1600px以下のJPEGに作り直してから送る
-     （作り直すので、位置情報などの撮影データ(EXIF)は送られない）
-   ・運動記録の写真は「タイムラインに投稿する」を押したときだけ送る。記録しただけでは送らない
-   ・migration 未適用の環境では image_path 列が無いので、従来の列だけで読み直す */
+
 const SNS_POST_COLS='id,user_id,body,activity_type,created_at';
 const SNS_POST_COLS_IMG=SNS_POST_COLS+',image_path';
 let   SNS_HAS_IMAGE_COL=true;
@@ -4944,17 +4885,7 @@ function snsGuard(uid){
   return null;
 }
 
-/* ── プロフィール ────────────────────────────────────────────────────────
-   投稿・コメント・フォローは profiles を参照するため、行が無いと書き込めない。
-   サインアップ時のトリガーでも作られるが、既存ユーザーのために毎回念のため入れる。
 
-   full=false（既定・投稿やリアクションの直前に呼ばれる）:
-     「行があることを保証する」のが目的。中身が入っている項目だけを書き、
-     空の値でサーバー側のプロフィールを上書きしない。
-     ※ここを無条件upsertにすると、端末のstate.userが空のときに
-       サーバーの自己紹介や都道府県を消してしまう。
-   full=true（プロフィール編集画面の保存）:
-     ユーザーが自分で消した項目も反映したいので、空も含めてそのまま書く。 */
 async function snsEnsureProfile(uid,user,opts){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   const full=!!(opts&&opts.full);
@@ -4978,16 +4909,7 @@ async function snsEnsureProfile(uid,user,opts){
   }catch(e){return snsNg(e,t('sns.errProfile'));}
 }
 
-/* ═══════════════ 【v51.4新規追加】非公開アカウント対応の取得ヘルパー ═══════════════
-   v51.4 の Supabase では、profiles の行は「自分 or 公開アカウント」しか読めません。
-   ただし、公開ユーザーの投稿に非公開ユーザーがコメントした場合などに
-   名前とアイコンが消えてしまわないよう、DB側に
 
-     public_profiles … id / nickname / avatar_url だけを返すVIEW
-     yt_follow_counts(target) … フォロー数・フォロワー数の「件数だけ」を返す関数
-
-   を用意してあります。どちらもまだ無いDB（migration未適用）では、
-   自動的に v51.3 までと同じ取得方法へ戻るので、アプリだけ先に公開しても壊れません。 */
 let SNS_HAS_PUBLIC_VIEW=true;
 let SNS_HAS_FOLLOW_RPC=true;
 function snsIsMissingRelation(e){
@@ -5065,10 +4987,7 @@ async function snsFetchUserCounts(uid,targetId){
   }catch(e){return snsNg(e,t('sns.errCount'));}
 }
 
-/* ── タイムライン ────────────────────────────────────────────────────────
-   mode: 'all'（新着順の全体） / 'following'（フォロー中の人だけ）
-   将来 'recommend'（おすすめ）や 'region'（地域）を足せるよう、
-   ここで候補のuser_idを絞ってから同じ描画に流す形にしてある(§10)。 */
+
 async function snsFetchTimeline(uid,mode){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
@@ -5180,11 +5099,7 @@ async function snsCreatePost(uid,{body,activityType,imageBlob},user){
 async function snsSoftDeletePost(uid,postId,imagePath){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
-    /* 【v51.2】写真つき投稿は、投稿を非表示(is_deleted)にしたうえで写真ファイルも消す。
-       【v51.4.6】順番を「写真の削除 → 投稿の削除」に変更。
-       写真の削除に失敗したら投稿は残したままエラーを返す（もう一度削除を押せば再試行できる）。
-       写真だけ消えて投稿の更新に失敗した場合も、投稿が残るので同じ操作で再試行できる
-       （存在しない写真の remove はエラーにならない）。写真が誰からも参照されずに残る状態を作らない。 */
+    
     const own=snsIsOwnImagePath(uid,imagePath);
     if(own&&!(await snsRemovePostImage(uid,imagePath)))
       throw new Error('post image remove failed');
@@ -5296,13 +5211,7 @@ async function snsSetFollow(uid,targetId,on,user){
   }catch(e){return snsNg(e,'フォローを更新できなかったみたい🐼');}
 }
 
-/* ═══════════════ 【v50新規追加】SNS安全機能（通報・ブロック） ═══════════════
-   方針:
-     ・既存のSNS関数の書き方（{data,error} を返す・error はユーザーに見せる文言）に合わせる
-     ・reports / blocks が未作成の環境でも、SNSはこれまでどおり動く
-       （ブロック0件として扱い、通報だけがエラーになる）
-     ・reports はクライアントからSELECTできない。書き込みだけができる。
-   ═══════════════════════════════════════════════════════════════════════════ */
+
 
 /* ブロック中のユーザーIDの一覧。タイムライン取得のたびに読み直す。
    Setはモジュール内に1つだけ持ち、描画側は snsIsBlockedId() で見るだけにする。 */
@@ -5401,16 +5310,7 @@ async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   }
 }
 
-/* ═══════════════ 【v50.1新規追加】投稿前の軽い安全対策 ═══════════════
-   目的は「明らかに危険・攻撃的な投稿を完全放置しないこと」だけ。
-   AIモデレーション・外部Moderation API・巨大NGワード辞書は使わない。
-   v50の通報／ブロックを置き換えるものではなく、その補助として足すだけ。
 
-   ここで行うのは次の3つ。
-     ① 連投防止（投稿10秒 / コメント5秒）
-     ② 空白だけの投稿・コメントの防止（既存のtrim処理をそのまま活かす）
-     ③ 明白に危険な「フレーズ」だけの拒否
-   ═══════════════════════════════════════════════════════════════════ */
 
 /* ── ① 連投防止 ─────────────────────────────────────────────────
    保存はメモリ上だけ。localStorage には新しいキーを増やさない。
@@ -5430,17 +5330,7 @@ function snsCooldownLeft(kind){
 /* 送信が「成功したときだけ」呼ぶ。失敗した投稿でクールダウンさせない。 */
 function snsMarkSent(kind){ YT_LAST_SENT_AT[kind]=Date.now(); }
 
-/* ── ③ 明白に危険なフレーズ ────────────────────────────────────
-   方針（過剰フィルタを避けるため、ここは意図的に狭くしている）:
-     ・1単語だけの一致では判定しない。危険性が明確なフレーズ単位にする
-     ・「死ぬほど疲れた」「筋トレで殺された（笑）」「殺しにくるメニュー」
-       のような、運動アプリでよくある比喩は必ず通す
-     ・政治／宗教／ネガティブ感情／悪口全般／医療／ダイエット／ラーメン／
-       飲酒／軽い冗談は一切対象にしない
-   対象は次の3カテゴリのみ。
-     A. 明白な殺害・傷害の予告
-     B. 自傷を直接促す表現
-     C. 他人への重大な暴力を具体的に促す表現 */
+
 const SNS_DANGER_PATTERNS=[
   /* ── 日本語 ── */
   /殺してやる/,            // A（「殺された」「殺しにくる」は対象外）
@@ -5479,19 +5369,7 @@ function snsHasDangerPhrase(text){
   return false;
 }
 
-/* ═══════════════ 【v50.2新規追加】「記録して投稿」の自動生成本文 ═══════════════
-   ・日本語モードの出来上がりは v50.1 と完全に同一
-       ウォーキング → 「ウォーキングをやったよ〜」
-       その他       → 「その他をやったよ〜」
-       種別なし     → 「ちょっとだけ動いた〜」
-   ・英語モードは運動種別ごとに自然な言い回しにする
-       walking / running / stretching / gym training / home workout
-       その他       → 「Got a little movement in today~」
-       種別なし     → 「Moved a little today~」
-   ・作成した本文は「投稿した時点の言語」でそのままDBへ保存する。
-     保存済みの過去投稿には一切手を入れない（翻訳もUPDATEもしない）。
-   ・fallback（種別を取得できないとき）の発生条件は v50.1 から変更していない。
-     変わったのは文言が日英になったことだけ。 */
+
 function snsAutoPostBody(act){
   if(!act)return t('sns.autoPostFallback');
   if(act.id==='other')return t('sns.autoPostOther');
@@ -5500,10 +5378,7 @@ function snsAutoPostBody(act){
   return t('sns.autoPost',{act:name});
 }
 
-/* ═══════════════ 【v50新規追加】アカウント削除 ═══════════════
-   Supabase Edge Function（supabase/functions/delete-account）を呼ぶだけ。
-   service_role key はここには存在しない（サーバー側のsecretのみ）。
-   本人確認は Edge Function 側が Authorization の JWT で行う。 */
+
 async function ytDeleteAccount(uid){
   if(!supabaseClient)return {data:null,error:t('legal.delFail')};
   if(!uid||uid==='guest')return {data:null,error:t('legal.delNeedLogin')};
@@ -5541,12 +5416,7 @@ function ytClearLocalDataForUser(uid){
   try{ sessionStorage.removeItem('yurutore_welcome_seen_v13'); }catch(e){}
 }
 
-/* 【v51.4.4新規追加】体験版を新しく始めるときだけ、前回の体験版の「部屋の記録」を片付ける。
-   部屋の解放記録(everOk)とパンダ統計(来室回数・会話日数)は 'guest' 共通キーに保存されるため、
-   ログアウト等で体験版の記録(state)が初期化されても残り、新しい体験版の部屋が
-   前回の解放数(例: 16/35 → Lv.6)から始まっていた。
-   ・対象は guest の2キーだけ(ログイン済みユーザーのキーには触れない)
-   ・体験版の記録・ミッション・ポイント等が1件でもあれば何もしない(既存データを守る) */
+
 function ytResetGuestRoomIfFresh(s){
   try{
     const x=s||{};
@@ -5735,6 +5605,8 @@ function AppLogic({devId}){
   const platform=useContext(DevCtx);
   const [st,setSt]=useState(null);
   const [session,setSession]=useState(null);
+  const [passwordRecovery,setPasswordRecovery]=useState(YT_RECOVERY_RETURN);
+  const [recoveryUserId,setRecoveryUserId]=useState(null);
   const [authChecked,setAuthChecked]=useState(false);
   const [authLoading,setAuthLoading]=useState(false);
   const [authError,setAuthError]=useState('');
@@ -5775,13 +5647,23 @@ function AppLogic({devId}){
     supabaseClient.auth.getSession()
       .then(({data})=>{
         if(!alive)return;
-        setSession((data&&data.session)||null);
+        const next=(data&&data.session)||null;
+        if(next&&ytRecoveryPending(next.user.id)){setPasswordRecovery(true);setRecoveryUserId(next.user.id);}
+        setSession(next);
         if(data&&data.session)cleanAuthUrl();   // OAuthから戻った直後のURLを整える
       })
       .catch(()=>{})
       .finally(()=>{ if(alive)setAuthChecked(true); });
     const {data:{subscription}}=supabaseClient.auth.onAuthStateChange((_event,nextSession)=>{
       if(!alive)return;
+      if(_event==='PASSWORD_RECOVERY'){
+        setRecoveryUserId(nextSession&&nextSession.user&&nextSession.user.id);
+        ytRecoveryRemember(nextSession&&nextSession.user&&nextSession.user.id);
+        setPasswordRecovery(true);
+      }else if(_event==='SIGNED_OUT'){
+        setRecoveryUserId(null);
+        ytRecoveryRemember(null);
+      }
       avatarResetCache(nextSession&&nextSession.user&&nextSession.user.id);   // 【v51.4.7】別の人の画像キャッシュを持ち越さない
       setSession(nextSession||null);
       setAuthChecked(true);
@@ -5830,6 +5712,8 @@ function AppLogic({devId}){
   },[st,devId,session?.user?.id]);
 
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
+
+  if(passwordRecovery)return <PasswordRecoveryScreen session={session?.user?.id===recoveryUserId?session:null} onDone={()=>{ytRecoveryRemember(null);setPasswordRecovery(false);}}/>;
 
   const showToast=m=>{setToast(m);setTimeout(()=>setToast(cur=>cur===m?null:cur),1900)};   /* 【v51.2】別のトーストは消さない */
 
@@ -6337,6 +6221,41 @@ function LangSwitch({compact}){
       <button type="button" className={lang==='en'?'on':''} onClick={()=>ytSetLang('en')} lang="en">English</button>
     </div>
   );
+}
+
+// Recovery is handled before home/onboarding; the SDK validates the authenticated update.
+function PasswordRecoveryScreen({session,onDone}){
+  const ja=ytGetLang()==='ja';
+  const [password,setPassword]=useState(''),[confirm,setConfirm]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+  const lock=useRef(false);
+  const text=(j,e)=>ja?j:e;
+  const submit=async e=>{
+    e.preventDefault();if(lock.current)return;setError('');
+    if(!session||!session.user||!supabaseClient){setError(text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.'));return;}
+    if(password.length<8){setError(text('パスワードは8文字以上で入力してください。','Use at least 8 characters.'));return;}
+    if(password!==confirm){setError(text('確認用パスワードが一致しません。','Passwords do not match.'));return;}
+    lock.current=true;setBusy(true);
+    try{
+      const {error}=await supabaseClient.auth.updateUser({password});
+      if(error)throw error;
+      setPassword('');setConfirm('');setSaved(true);ytRecoveryRemember(null);
+    }catch(e){setError(text('保存できませんでした。通信状態やリンクの期限を確認し、もう一度お試しください。','Could not save. Check your connection and link expiry, then try again.'));}
+    finally{lock.current=false;setBusy(false);}
+  };
+  return <div style={{padding:24,maxWidth:420,margin:'auto',width:'100%',boxSizing:'border-box'}}>
+    <h1 style={{fontSize:22}}>{text('パスワードを再設定','Reset your password')}</h1>
+    {saved?<><p role="status">{text('新しいパスワードを保存しました。','Your new password has been saved.')}</p><button className="btn" onClick={onDone}>{text('続ける','Continue')}</button></>:
+    !session?.user?<><p role="alert">{text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.')}</p><button className="btn" onClick={onDone}>{text('戻る','Back')}</button></>:
+    <form onSubmit={submit}>
+      <label className="lbl" htmlFor="recovery-password">{text('新しいパスワード','New password')}</label>
+      <input id="recovery-password" className="field" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/>
+      <label className="lbl" htmlFor="recovery-confirm">{text('新しいパスワード（確認）','Confirm new password')}</label>
+      <input id="recovery-confirm" className="field" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy}/>
+      {error&&<p role="alert">{error}</p>}
+      <button className="btn" type="submit" disabled={busy}>{text(busy?'保存中…':'パスワードを保存',busy?'Saving…':'Save password')}</button>
+    </form>}
+  </div>;
 }
 
 function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPassword,authLoading,authError,authNotice}){
@@ -12071,7 +11990,10 @@ function BuildStamp(){
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+
+
 </script>
 
 </body>
 </html>
+
