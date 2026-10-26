@@ -671,7 +671,7 @@ const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_U
    GoogleログインやパスワードGoogle再設定のあと、どこへ戻すかをここ1か所で決める。
    stagingは許可したテストURLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
    ローカル開発(localhost / 127.0.0.1 / file://)のときだけ、いま開いている場所へ戻す。 */
-const STAGING_GOOGLE_ENABLED=false;
+const STAGING_GOOGLE_ENABLED=true;
 
 /* ═══════════════ 【v50新規追加】リーガル設定 ═══════════════
    公開ページ（/privacy/ など）は静的HTMLで、legal/legal.js に同じ設定がある。

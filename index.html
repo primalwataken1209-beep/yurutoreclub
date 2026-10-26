@@ -1927,7 +1927,7 @@ html[lang="en"] .home-cta-title{letter-spacing:-.01em;}
 </style>
 </head>
 <body>
-<div id="staging-label" style="position:fixed;top:0;left:0;z-index:2147483647;background:#fff4c8;color:#4a3a12;padding:3px 8px;font:11px sans-serif;pointer-events:none">テスト版 · staging専用 · Google認証無効</div>
+<div id="staging-label" style="position:fixed;top:0;left:0;z-index:2147483647;background:#fff4c8;color:#4a3a12;padding:3px 8px;font:11px sans-serif;pointer-events:none">テスト版 · staging専用</div>
 <div id="root"></div>
 
 <!--
@@ -2622,7 +2622,7 @@ const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_U
    GoogleログインやパスワードGoogle再設定のあと、どこへ戻すかをここ1か所で決める。
    stagingは許可したテストURLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
    ローカル開発(localhost / 127.0.0.1 / file://)のときだけ、いま開いている場所へ戻す。 */
-const STAGING_GOOGLE_ENABLED=false;
+const STAGING_GOOGLE_ENABLED=true;
 
 /* ═══════════════ 【v50新規追加】リーガル設定 ═══════════════
    公開ページ（/privacy/ など）は静的HTMLで、legal/legal.js に同じ設定がある。
