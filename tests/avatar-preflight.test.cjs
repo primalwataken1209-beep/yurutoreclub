@@ -7,8 +7,8 @@ const source=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
 function setup(options={}){
   const calls=[], revoked=[];let viewer='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const sdk={auth:{getSession:async()=>({data:{session:viewer?{user:{id:viewer}}:null}})},storage:{from:bucket=>({
-    download:async p=>{calls.push(['download',bucket,p]);return options.download?options.download():{data:{fake:true},error:null};},
-    upload:async(p,b,o)=>{calls.push(['upload',bucket,p]);return {error:null};},
+    download:async(p,o,f)=>{calls.push(['download',bucket,p,o,f]);return options.download?options.download():{data:{fake:true},error:null};},
+    upload:async(p,b,o)=>{calls.push(['upload',bucket,p,o]);return {error:null};},
     remove:async p=>{calls.push(['remove',bucket,p]);return {error:options.removeError||null};}
   })}};
   const start=source.indexOf("const AVATAR_BUCKET=");
@@ -37,4 +37,6 @@ test('uploads return private references instead of public URLs',async()=>{const 
 test('deletion failures are surfaced; successful removal clears cached blobs',async()=>{const bad=setup({removeError:new Error('offline')});assert.equal(await bad.api.removeAvatarFromSupabase(uid),false);const x=setup();await x.api.loadAvatarEntry(ref);assert.equal(await x.api.removeAvatarFromSupabase(uid),true);assert.equal(x.revoked.length,1);});
 test('external avatars are local-only and staging configuration was not transplanted',()=>{const x=setup();assert.equal(x.api.selfAvatarLocal({avatarUrl:'https://external.test/photo.jpg'}),'https://external.test/photo.jpg');assert.equal(x.api.avatarRefFromValue('https://external.test/photo.jpg'),null);assert.ok(!source.includes('knftduojdalnawvkbelt'));assert.ok(!source.includes('STAGING_GOOGLE_ENABLED'));});
 test('the app stays below Babel auto-compact threshold',()=>{assert.ok(source.length<500000,'Babel reports its large-input note above 500000 characters');});
+test('new network reads change cache nonce and disable browser storage',async()=>{const x=setup();await x.api.loadAvatarEntry(ref);const first=x.calls[0];assert.equal(first[4].cache,'no-store');assert.ok(first[3].cacheNonce);x.api.avatarResetCache(null);await x.api.loadAvatarEntry(ref);assert.notEqual(x.calls[1][3].cacheNonce,first[3].cacheNonce);});
+test('new uploads request zero max-age',async()=>{const x=setup();await x.api.uploadAvatarToSupabase(uid,'data:image/jpeg;base64,eA==');assert.equal(x.calls[0][3].cacheControl,'0');});
 

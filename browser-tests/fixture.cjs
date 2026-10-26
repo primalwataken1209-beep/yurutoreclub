@@ -21,7 +21,7 @@ for(const [remote,local] of [
   ['https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js','/vendor/react.js'],
   ['https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js','/vendor/react-dom.js'],
   ['https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js','/vendor/babel.js'],
-  ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2','/offline-sdk.js']
+  ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0','/offline-sdk.js']
 ]){if(!html.includes(remote))throw new Error('Review browser fixture library mapping: '+remote);for(const route of ['/','/index.html'])assertScriptsAllowed(policies(route),[remote]);html=html.replace(remote,local);}
 html=html.replace('<head>','<head><script src="/offline-guard.js"></script>');
 html=html.replace('</body>','<div style="position:fixed;top:5px;left:5px;z-index:999999;background:#fff4c8;padding:4px 8px;border-radius:5px;font:11px sans-serif">隔離ブラウザ検証 · 本番DB非接続</div></body>');
@@ -54,3 +54,4 @@ async function startFixture(){
   return {server,missing,origin:'http://127.0.0.1:'+server.address().port};
 }
 module.exports={startFixture};
+

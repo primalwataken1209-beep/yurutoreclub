@@ -2687,7 +2687,7 @@ async function loadAvatarEntry(value){
   if(AVATAR_PENDING[key])return AVATAR_PENDING[key];
   const job=(async()=>{
     try{
-      const {data,error}=await supabaseClient.storage.from(AVATAR_BUCKET).download(ref.path);
+      const {data,error}=await supabaseClient.storage.from(AVATAR_BUCKET).download(ref.path,{cacheNonce:Date.now()+'-'+Math.random().toString(36).slice(2)},{cache:'no-store'});
       if(error||!data)throw error||new Error('no data');
       if(gen!==AVATAR_STATE.gen)return {url:null,exp:0};    // 取得中に閲覧者が変わった → 破棄
       if(hit&&hit.url){ try{URL.revokeObjectURL(hit.url);}catch(_){} }
@@ -2755,7 +2755,7 @@ async function uploadAvatarToSupabase(userId,dataUrl){
     if(!supabaseClient||!userId||userId==='guest'||!dataUrl)return null;
     const blob=dataUrlToBlob(dataUrl);
     const path=`${userId}/avatar.jpg`; // 本人フォルダ配下のみ書き込み可（RLSで制限）
-    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).upload(path,blob,{upsert:true,contentType:'image/jpeg'});
+    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).upload(path,blob,{upsert:true,contentType:'image/jpeg',cacheControl:'0'});
     if(error)return null;
     const ref=`avatars/${path}?v=${Date.now()}`;
     return avatarRefFromValue(ref)?ref:null;
