@@ -661,6 +661,10 @@ function stagingFetch(input,options){
   if(url.origin!==SUPABASE_URL)throw new Error('Blocked non-staging API request');
   return window.fetch(input,options);
 }
+// Capture recovery intent before the SDK consumes the callback URL. No tokens are stored.
+const YT_RECOVERY_RETURN=(()=>{try{return new URLSearchParams(location.hash.slice(1)).get('type')==='recovery';}catch(e){return false;}})();
+function ytRecoveryRemember(uid){try{if(uid)sessionStorage.setItem('yt-password-recovery-user',uid);else sessionStorage.removeItem('yt-password-recovery-user');}catch(e){}}
+function ytRecoveryPending(uid){try{return !!uid&&sessionStorage.getItem('yt-password-recovery-user')===uid;}catch(e){return false;}}
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,{global:{fetch:stagingFetch}}) : null;
 
 /* ═══════════════ 【v43.1】認証の戻り先URL ═══════════════
@@ -3799,6 +3803,8 @@ function AppLogic({devId}){
   const platform=useContext(DevCtx);
   const [st,setSt]=useState(null);
   const [session,setSession]=useState(null);
+  const [passwordRecovery,setPasswordRecovery]=useState(YT_RECOVERY_RETURN);
+  const [recoveryUserId,setRecoveryUserId]=useState(null);
   const [authChecked,setAuthChecked]=useState(false);
   const [authLoading,setAuthLoading]=useState(false);
   const [authError,setAuthError]=useState('');
@@ -3839,13 +3845,23 @@ function AppLogic({devId}){
     supabaseClient.auth.getSession()
       .then(({data})=>{
         if(!alive)return;
-        setSession((data&&data.session)||null);
+        const next=(data&&data.session)||null;
+        if(next&&ytRecoveryPending(next.user.id)){setPasswordRecovery(true);setRecoveryUserId(next.user.id);}
+        setSession(next);
         if(data&&data.session)cleanAuthUrl();   // OAuthから戻った直後のURLを整える
       })
       .catch(()=>{})
       .finally(()=>{ if(alive)setAuthChecked(true); });
     const {data:{subscription}}=supabaseClient.auth.onAuthStateChange((_event,nextSession)=>{
       if(!alive)return;
+      if(_event==='PASSWORD_RECOVERY'){
+        setRecoveryUserId(nextSession&&nextSession.user&&nextSession.user.id);
+        ytRecoveryRemember(nextSession&&nextSession.user&&nextSession.user.id);
+        setPasswordRecovery(true);
+      }else if(_event==='SIGNED_OUT'){
+        setRecoveryUserId(null);
+        ytRecoveryRemember(null);
+      }
       avatarResetCache(nextSession&&nextSession.user&&nextSession.user.id);   // 【v51.4.7】別の人の画像キャッシュを持ち越さない
       setSession(nextSession||null);
       setAuthChecked(true);
@@ -3894,6 +3910,8 @@ function AppLogic({devId}){
   },[st,devId,session?.user?.id]);
 
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
+
+  if(passwordRecovery)return <PasswordRecoveryScreen session={session?.user?.id===recoveryUserId?session:null} onDone={()=>{ytRecoveryRemember(null);setPasswordRecovery(false);}}/>;
 
   const showToast=m=>{setToast(m);setTimeout(()=>setToast(cur=>cur===m?null:cur),1900)};   /* 【v51.2】別のトーストは消さない */
 
@@ -4402,6 +4420,41 @@ function LangSwitch({compact}){
       <button type="button" className={lang==='en'?'on':''} onClick={()=>ytSetLang('en')} lang="en">English</button>
     </div>
   );
+}
+
+// Recovery is handled before home/onboarding; the SDK validates the authenticated update.
+function PasswordRecoveryScreen({session,onDone}){
+  const ja=ytGetLang()==='ja';
+  const [password,setPassword]=useState(''),[confirm,setConfirm]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+  const lock=useRef(false);
+  const text=(j,e)=>ja?j:e;
+  const submit=async e=>{
+    e.preventDefault();if(lock.current)return;setError('');
+    if(!session||!session.user||!supabaseClient){setError(text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.'));return;}
+    if(password.length<8){setError(text('パスワードは8文字以上で入力してください。','Use at least 8 characters.'));return;}
+    if(password!==confirm){setError(text('確認用パスワードが一致しません。','Passwords do not match.'));return;}
+    lock.current=true;setBusy(true);
+    try{
+      const {error}=await supabaseClient.auth.updateUser({password});
+      if(error)throw error;
+      setPassword('');setConfirm('');setSaved(true);ytRecoveryRemember(null);
+    }catch(e){setError(text('保存できませんでした。通信状態やリンクの期限を確認し、もう一度お試しください。','Could not save. Check your connection and link expiry, then try again.'));}
+    finally{lock.current=false;setBusy(false);}
+  };
+  return <div style={{padding:24,maxWidth:420,margin:'auto',width:'100%',boxSizing:'border-box'}}>
+    <h1 style={{fontSize:22}}>{text('パスワードを再設定','Reset your password')}</h1>
+    {saved?<><p role="status">{text('新しいパスワードを保存しました。','Your new password has been saved.')}</p><button className="btn" onClick={onDone}>{text('続ける','Continue')}</button></>:
+    !session?.user?<><p role="alert">{text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.')}</p><button className="btn" onClick={onDone}>{text('戻る','Back')}</button></>:
+    <form onSubmit={submit}>
+      <label className="lbl" htmlFor="recovery-password">{text('新しいパスワード','New password')}</label>
+      <input id="recovery-password" className="field" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/>
+      <label className="lbl" htmlFor="recovery-confirm">{text('新しいパスワード（確認）','Confirm new password')}</label>
+      <input id="recovery-confirm" className="field" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy}/>
+      {error&&<p role="alert">{error}</p>}
+      <button className="btn" type="submit" disabled={busy}>{text(busy?'保存中…':'パスワードを保存',busy?'Saving…':'Save password')}</button>
+    </form>}
+  </div>;
 }
 
 function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPassword,authLoading,authError,authNotice}){
