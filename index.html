@@ -12,7 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0"></script>
 
 <!-- ② スタイルシート (style.css) -->
 <link rel="stylesheet" href="style.css"/>
@@ -1947,21 +1947,10 @@ html[lang="en"] .home-cta-title{letter-spacing:-.01em;}
   ─────────────────────────────────────────────────────────
 -->
 <script type="text/babel" data-presets="env,react">
+/* app.js — index.html のインラインと同一（v51.4.2 パスワード8文字（新規登録のみ））本番は inline 版。 */
 const {useState,useEffect,useRef,createContext,useContext}=React;
 
-/* ═══════════════ 【v48新規追加】多言語(i18n)基盤 ═══════════════
-   目的: 英語版を別アプリにせず、1つのアプリの中で日本語／英語を切り替える。
-         将来 ko / zh / es を足すときも、I18N に言語キーを1つ増やすだけで済む。
 
-   設計:
-     ・表示文字列は I18N の辞書に置き、画面側は t('welcome.ctaStart') で引く
-     ・未翻訳のキーは自動で日本語へフォールバックする(画面が空にならない)
-     ・言語は localStorage の 'yurutore_language' にだけ保存する
-       (既存のキーは1つも変更・削除していない)
-     ・言語が変わったら購読者へ通知し、アプリ全体を再描画する(リロード不要)
-
-   優先順位(§6): ①ユーザーが選んだ保存済み言語 → ②端末の言語 → ③en
-   ═══════════════════════════════════════════════════════════════ */
 const YT_LANG_KEY='yurutore_language';     // ← v48で新規に増えた唯一のキー
 const YT_LANGS=['ja','en'];                // 将来ここに 'ko','zh' などを足せる
 function ytDetectLang(){
@@ -2126,6 +2115,8 @@ ja:{
     mdGift:'🎁 プレゼント', mdShop:'🛒 ショップ',
     minAgo:'{n}分前', hourAgo:'{n}時間前', dayAgo:'{n}日前',
     pfHeadMsg:'今日もおつかれさま！', pfHeadSub:'食べながらでもいいし、ゆるく楽しく続けよう',
+    pfNoRecord:'まだ記録はないけど、今日来てくれた。それだけで十分えらいよ🐼',
+    pfStartedToday:'{name}さん、今日、最初の記録ができたね。それだけで十分えらいよ🐼',
     pfSince:'「{days}日前に始めた{name}さん、今日も来てくれた。それだけで十分えらい。」'},
   confirm:{badge:'STEP 1 完了', title:'確認メールを送信しました',
     to:'{email} 宛に', body:'確認メールを送信しました。メール内のリンクを開いて登録を完了してください。',
@@ -2217,8 +2208,8 @@ ja:{
     resetLead:'登録したメールアドレスを入力してね。再設定用のリンクを送るよ🐼',
     sendReset:'再設定メールを送る', backToLogin:'← ログインへ戻る',
     title:'一緒にゆるく続けよう',
-    leadGate:'メール登録すると、あとでデータ保存やログイン機能につなげられるよ。',
-    leadReg:'メール登録すると、将来データ保存や機種変更にもつなげやすくなるよ。',
+    leadGate:'メールアドレスで登録・ログインできるよ。登録せずに体験版から始めることもできるよ🐼',
+    leadReg:'メールアドレスで登録・ログインできるよ。まずは体験版から試してもOK🐼',
     tabRegister:'新規登録', tabLogin:'ログイン',
     email:'メールアドレス', password:'パスワード', passwordPh:'8文字以上', passwordPhLogin:'パスワード',
     forgot:'パスワードを忘れた方はこちら',
@@ -2410,6 +2401,8 @@ en:{
     mdGift:'🎁 Gifts', mdShop:'🛒 Shop',
     minAgo:'{n} min ago', hourAgo:'{n} h ago', dayAgo:'{n} d ago',
     pfHeadMsg:'Good to see you today', pfHeadSub:'Snacks are allowed. Keep it easy and enjoyable',
+    pfNoRecord:'No records yet, but you showed up today. That alone is worth celebrating. 🐼',
+    pfStartedToday:'{name}, you made your first record today. That alone is worth celebrating. 🐼',
     pfSince:'"{name} started {days} days ago, and came back again today. That alone is plenty."'},
   confirm:{badge:'Step 1 done', title:'We sent you a confirmation email.',
     to:'Sent to {email}', body:'Open the link in the email to finish signing up.',
@@ -2500,8 +2493,8 @@ en:{
     resetLead:"Pop in the email you signed up with and we'll send you a reset link 🐼",
     sendReset:'Send reset email', backToLogin:'← Back to log in',
     title:"Let's keep it easy together",
-    leadGate:'Adding an email lets you save your data and log in later.',
-    leadReg:'Adding an email makes it easy to keep your data if you change phones.',
+    leadGate:'Sign up or log in with your email. You can also try the demo without an account. 🐼',
+    leadReg:'Sign up or log in with your email. Trying the demo first is fine too. 🐼',
     tabRegister:'Sign up', tabLogin:'Log in',
     email:'Email', password:'Password', passwordPh:'8 characters or more', passwordPhLogin:'Password',
     forgot:'Forgot your password?',
@@ -2600,20 +2593,16 @@ en:{
 // Service Role Key（秘密鍵）は絶対にフロントエンドのコードに書かないでください。
 const SUPABASE_URL='https://eszheiabjwehcbrteqza.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_XINCdNEKIrUVQJY8tZlOPw_wp8eJ7CW';
+// Capture recovery intent before the SDK consumes the callback URL. No tokens are stored.
+const YT_RECOVERY_RETURN=(()=>{try{return new URLSearchParams(location.hash.slice(1)).get('type')==='recovery';}catch(e){return false;}})();
+function ytRecoveryRemember(uid){try{if(uid)sessionStorage.setItem('yt-password-recovery-user',uid);else sessionStorage.removeItem('yt-password-recovery-user');}catch(e){}}
+function ytRecoveryPending(uid){try{return !!uid&&sessionStorage.getItem('yt-password-recovery-user')===uid;}catch(e){return false;}}
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-/* ═══════════════ 【v43.1】認証の戻り先URL ═══════════════
-   GoogleログインやパスワードGoogle再設定のあと、どこへ戻すかをここ1か所で決める。
-   本番は必ず公開URLへ戻す（Supabase側の Redirect URLs にもこのURLを登録しておく）。
-   ローカル開発(localhost / 127.0.0.1 / file://)のときだけ、いま開いている場所へ戻す。 */
+
 const APP_PUBLIC_URL='https://yurutore-club.netlify.app/';
 
-/* ═══════════════ 【v50新規追加】リーガル設定 ═══════════════
-   公開ページ（/privacy/ など）は静的HTMLで、legal/legal.js に同じ設定がある。
-   アプリ側から参照するのはリンク先URLだけ。
-   ★ 運営者名 / 問い合わせ先の PLACEHOLDER は legal/legal.js の
-     YT_LEGAL_CONFIG が正（1か所）。公開前に必ず差し替えること。
-     詳細は README_v50_legal_safety.md を参照。 */
+
 const LEGAL_URLS={
   terms:'/terms/',
   privacy:'/privacy/',
@@ -2673,11 +2662,7 @@ function validateAuthInput(email,pass,mode){
   if(!e) return t('msg.emailRequired');
   if(!isValidEmail(e)) return t('msg.emailInvalid');
   if(!p) return t('msg.passRequired');
-  /* 【v51.4.2】8文字以上のチェックは「新規登録」のときだけ行う。
-     ・新規登録 … Supabase本番の Minimum password length = 8 に合わせて、送信前に止める
-     ・ログイン … 文字数では弾かない。6〜7文字のパスワードを使っている既存ユーザーが
-                  今までどおりログインできるようにするため（正否の判定はSupabaseに任せる）
-     mode を渡さずに呼んだ場合は、安全側（8文字以上を必須）として扱う。 */
+  
   if(mode!=='login' && p.length<8) return t('msg.passShort');
   return null;
 }
@@ -4153,11 +4138,7 @@ function pickPraiseMessage(aid){
 
 
 
-/* ═══════════════ 【v38新規追加】パンジローの全力リアクション ═══════════════
-   運動を記録した瞬間に「パンジローが全力で褒めに来る」ための定義。
-   ・新しい保存データ・localStorageキーは一切増やしていません（すべてその場で抽選）
-   ・文章は1〜3行の短文のみ。責める/煽る/比較する表現は入れません
-   ・anim は CSS の .pj-a-* に対応（transform中心の軽量アニメ）                */
+
 
 /* 通常リアクション（7種） */
 const PJ_NORMAL=[
@@ -4223,22 +4204,13 @@ const PJ_MILESTONES={
   100:{id:'m100',anim:'crown', pose:'happy',tag:'100日',confetti:true,props:{top:'👑'},lines:['100回。','言葉にならないよ🐼'],lines_en:['One hundred.','I have no words 🐼']},
 };
 
-/* 【v38.1新規追加】リアクション専用のパンジロー素材。
-   部屋用(assets/panda-room/v30/panda30_*.webp)は1536x1024の部屋レイヤーで、
-   パンダ本体が画面幅の約16%しかないため大きく表示できなかった。
-   ここでは本体だけを切り出した軽量素材(合計約98KB)を使う。
-   読み込めない場合は normal → 絵文字🐼 の順に安全にフォールバックする。 */
+
 const PJ38_DIR='assets/panda-room/v38/';
 const PJ38={normal:'pj38_normal.webp',happy:'pj38_happy.webp',sleepy:'pj38_sleepy.webp',ramen:'pj38_ramen.webp'};
 /* ※v38素材は削除していない。万一v51の見た目に問題が出たときは、
    PraiseScreen の PJ51_DIR / PJ51 を PJ38_DIR / PJ38 に戻すだけで元に戻せる。 */
 
-/* ═══════════════ 【v51新規追加】リアクション版パンジロー（淡いベージュTシャツ） ═══════════════
-   位置づけ: パンダルームのいつものパンジローが、運動記録を褒めるときだけTシャツに着替えた姿。
-   ・6ポーズ: normal / happy / guts / stretch / sleepy / ramen（背景透過WebP）
-   ・リアクションの抽選・セリフ・i18n・表示時間・CSSアニメーションは変更していない。
-     変えたのは「どのリアクションでどの画像を出すか」だけ。
-   ・読み込めない場合は normal → 絵文字🐼 の順に安全にフォールバックする（v38と同じ挙動）。 */
+
 const PJ51_DIR='assets/panda-room/v51/';
 const PJ51={normal:'pj51_normal.webp',happy:'pj51_happy.webp',guts:'pj51_guts.webp',
             stretch:'pj51_stretch.webp',sleepy:'pj51_sleepy.webp',ramen:'pj51_ramen.webp'};
@@ -4370,11 +4342,7 @@ const suggestReactions=(post,act)=>{
   return list.slice(0,5).map(getReaction);
 };
 
-/* ═══════════════ 【v43変更】ダミー投稿は本番から除外 ═══════════════
-   v42まではこのサンプルがタイムラインに混ざって表示されていたが、
-   v43で「実ユーザーの実投稿だけを出す」ようにしたため本番描画からは外した。
-   参照しているのは DevSnsDemo（?debug=sns のときだけ描画）だけで、
-   本番のタイムラインからは一切読まれない。削除はせず、開発用として残している。 */
+
 const DEV_SAMPLE_USERS=[
   {id:'u1',name:'みちこ', initial:'み',color:'#5DCBA8'},
   {id:'u2',name:'けんさん',initial:'け',color:'#6baed6'},
@@ -4579,18 +4547,143 @@ function dataUrlToBlob(dataUrl){
   return new Blob([arr],{type:mime});
 }
 
+/* v51.4.7: Private avatars; authenticated downloads and viewer-scoped caches. */
+const AVATAR_BUCKET='avatars';
+const AVATAR_UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const AVATAR_REF_RE=new RegExp('^avatars/('+AVATAR_UUID+')/avatar\\.jpg(?:\\?v=([0-9]{1,16}))?$');
+const AVATAR_CACHE_MS=5*60*1000;        // 取得できた画像を使い回す時間（過ぎたら RLS で再判定）
+const AVATAR_FAIL_MS=10*60*1000;        // 取得できなかった画像を再試行しない時間
+const AVATAR_BLOBS={};                  // key -> {url, exp}（メモリ上だけ）
+const AVATAR_FAILS={};                  // key -> 再試行してよい時刻
+const AVATAR_PENDING={};                // key -> Promise（同じ画像の同時取得をまとめる）
+/* 【v51.4.7追加修正】キャッシュは「見ている人（ログイン中のユーザー）」ごと。
+   key は「閲覧者ID#画像パス|版」。閲覧者が変わったら（ログアウト・別ユーザーでログイン）全部捨てる。 */
+const AVATAR_STATE={viewer:null,gen:0,listeners:new Set()};
+function avatarResetCache(viewer){
+  const v=viewer||null;
+  if(v===AVATAR_STATE.viewer)return;
+  AVATAR_STATE.viewer=v; AVATAR_STATE.gen++;
+  Object.keys(AVATAR_BLOBS).forEach(k=>{ try{URL.revokeObjectURL(AVATAR_BLOBS[k].url);}catch(_){} delete AVATAR_BLOBS[k]; });
+  Object.keys(AVATAR_FAILS).forEach(k=>{ delete AVATAR_FAILS[k]; });
+  Object.keys(AVATAR_PENDING).forEach(k=>{ delete AVATAR_PENDING[k]; });
+  AVATAR_STATE.listeners.forEach(fn=>{ try{fn();}catch(_){} });   // 表示中の画像を外して取り直させる
+}
+/* avatar_url の値から Storage 上のパスを取り出す。対象外の値は null。 */
+function avatarRefFromValue(v){
+  if(typeof v!=='string'||!v)return null;
+  let m=v.match(AVATAR_REF_RE);
+  if(!m){
+    const pre=SUPABASE_URL+'/storage/v1/object/public/avatars/';
+    if(v.indexOf(pre)!==0)return null;
+    m=('avatars/'+v.slice(pre.length)).match(AVATAR_REF_RE);
+    if(!m)return null;
+  }
+  return {path:m[1]+'/avatar.jpg', uid:m[1], key:m[1]+'/avatar.jpg|'+(m[2]||'')};
+}
+/* 画像本体を取得する。戻り値 {url, exp}：url は blob URL（取得できなければ null＝既定アイコン）、
+   exp はこの結果を使ってよい期限（成功＝キャッシュ期限、失敗＝再試行してよい時刻）。 */
+async function loadAvatarEntry(value){
+  const ref=avatarRefFromValue(value);
+  if(!ref||!supabaseClient)return {url:null,exp:0};
+  // 閲覧者は「ダウンロードに使われるセッション」と同じものから決める
+  let viewer=null;
+  try{ const {data}=await supabaseClient.auth.getSession(); viewer=(data&&data.session&&data.session.user&&data.session.user.id)||null; }catch(_){}
+  avatarResetCache(viewer);
+  if(!viewer)return {url:null,exp:0};                     // 未ログインでは取得しない
+  const gen=AVATAR_STATE.gen;
+  const key=viewer+'#'+ref.key;
+  const now=Date.now();
+  const hit=AVATAR_BLOBS[key];
+  if(hit&&hit.exp>now)return {url:hit.url,exp:hit.exp};
+  if(AVATAR_FAILS[key]&&AVATAR_FAILS[key]>now)return {url:null,exp:AVATAR_FAILS[key]};
+  if(AVATAR_PENDING[key])return AVATAR_PENDING[key];
+  const job=(async()=>{
+    try{
+      const {data,error}=await supabaseClient.storage.from(AVATAR_BUCKET).download(ref.path,{cacheNonce:Date.now()+'-'+Math.random().toString(36).slice(2)},{cache:'no-store'});
+      if(error||!data)throw error||new Error('no data');
+      if(gen!==AVATAR_STATE.gen)return {url:null,exp:0};    // 取得中に閲覧者が変わった → 破棄
+      if(hit&&hit.url){ try{URL.revokeObjectURL(hit.url);}catch(_){} }
+      const url=URL.createObjectURL(data);
+      const exp=Date.now()+AVATAR_CACHE_MS;
+      AVATAR_BLOBS[key]={url,exp};
+      delete AVATAR_FAILS[key];
+      return {url,exp};
+    }catch(e){
+      if(gen!==AVATAR_STATE.gen)return {url:null,exp:0};
+      if(hit&&hit.url){ try{URL.revokeObjectURL(hit.url);}catch(_){} }
+      delete AVATAR_BLOBS[key];
+      const exp=Date.now()+AVATAR_FAIL_MS;
+      AVATAR_FAILS[key]=exp;
+      return {url:null,exp};
+    }finally{ if(gen===AVATAR_STATE.gen)delete AVATAR_PENDING[key]; }
+  })();
+  AVATAR_PENDING[key]=job;
+  return job;
+}
+async function loadAvatarSrc(value){ return (await loadAvatarEntry(value)).url; }
+/* 本人の画面でだけ使う画像（端末内の dataURL、または本人の外部URL）。他人の表示には渡さない。 */
+function selfAvatarLocal(user){
+  if(!user)return null;
+  if(user.avatar)return user.avatar;
+  const u=user.avatarUrl;
+  return (typeof u==='string'&&/^https:\/\//.test(u)&&!avatarRefFromValue(u))?u:null;
+}
+/* 表示用フック。local（本人の端末画像）があればそれを優先し、通信しない。
+   【v51.4.7追加修正】表示中も、結果の期限（成功＝キャッシュ期限／失敗＝再試行時刻）が来たら取り直す。
+   非公開に切り替わっていれば、その時点で画像を外して既定アイコンにする。
+   初回表示でキャッシュを同期的に読まない（閲覧者の確認前に別の人のキャッシュを出さないため）。 */
+function useAvatarSrc(value,local){
+  const ref=local?null:avatarRefFromValue(value);
+  const [src,setSrc]=useState(null);
+  const [tick,setTick]=useState(0);
+  useEffect(()=>{
+    const onReset=()=>{ setSrc(null); setTick(n=>n+1); };
+    AVATAR_STATE.listeners.add(onReset);
+    return()=>{ AVATAR_STATE.listeners.delete(onReset); };
+  },[]);
+  useEffect(()=>{
+    if(local||!ref){setSrc(null);return;}
+    let alive=true, timer=null;
+    loadAvatarEntry(value).then(r=>{
+      if(!alive)return;
+      setSrc(r.url);
+      if(r.exp>0)timer=setTimeout(()=>{ if(alive)setTick(n=>n+1); },Math.max(1000,r.exp-Date.now()+50));
+    });
+    return()=>{alive=false; if(timer)clearTimeout(timer);};
+  },[value,local,tick]);
+  return local||src||null;
+}
+/* 繰り返し表示（一覧）用の小さな部品。取得できなければ fallback を表示する。 */
+function SnsAvatar({value,local,className,style,fallback}){
+  const src=useAvatarSrc(value,local);
+  return src?<img src={src} className={className} style={style} alt=""/>:fallback;
+}
+
 // プロフィール画像をSupabase Storage（avatarsバケット）へアップロードする。
 // バケット未作成・未ログイン時は null を返し、アプリ側はローカル画像(dataURL)で動き続ける。
+// 【v51.4.7】公開URLは取得・保存しない。戻り値は参照「avatars/{uid}/avatar.jpg?v=時刻」。
 async function uploadAvatarToSupabase(userId,dataUrl){
   try{
     if(!supabaseClient||!userId||userId==='guest'||!dataUrl)return null;
     const blob=dataUrlToBlob(dataUrl);
     const path=`${userId}/avatar.jpg`; // 本人フォルダ配下のみ書き込み可（RLSで制限）
-    const {error}=await supabaseClient.storage.from('avatars').upload(path,blob,{upsert:true,contentType:'image/jpeg'});
+    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).upload(path,blob,{upsert:true,contentType:'image/jpeg',cacheControl:'0'});
     if(error)return null;
-    const {data}=supabaseClient.storage.from('avatars').getPublicUrl(path);
-    return (data&&data.publicUrl)?`${data.publicUrl}?v=${Date.now()}`:null;
+    const ref=`avatars/${path}?v=${Date.now()}`;
+    return avatarRefFromValue(ref)?ref:null;
   }catch(e){return null;}
+}
+/* 【v51.4.7】プロフィール画像の削除。Storage のファイルも消す（参照を外すだけにしない）。
+   成功（ファイルが元から無い場合を含む）なら true。失敗なら false（呼び出し元は保存を中止する）。 */
+async function removeAvatarFromSupabase(userId){
+  try{
+    if(!supabaseClient||!userId||userId==='guest')return true;
+    const path=`${userId}/avatar.jpg`;
+    const {error}=await supabaseClient.storage.from(AVATAR_BUCKET).remove([path]);
+    if(error)return false;
+    Object.keys(AVATAR_BLOBS).forEach(k=>{ if(k.indexOf('#'+path+'|')>=0){ try{URL.revokeObjectURL(AVATAR_BLOBS[k].url);}catch(_){} delete AVATAR_BLOBS[k]; } });
+    return true;
+  }catch(e){return false;}
 }
 
 // プロフィールをSupabaseのprofilesテーブルへ保存する（将来の他ユーザー表示用）。
@@ -4613,35 +4706,12 @@ async function syncProfileToSupabase(userId,user){
   }catch(e){/* テーブル未作成などは無視（既存動作に影響させない） */}
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   【v43新規追加】実ユーザーSNS基盤 — Supabaseアクセス層
 
-   ここだけがSupabaseのSNSテーブルに触れる。画面(JSX)からSQLを直接書かない。
-   使うテーブルは supabase/migrations/20260101000000_v43_real_sns.sql で作る:
-     profiles / posts / post_reactions / comments / follows
-
-   方針:
-   ・認証は既存のSupabase認証をそのまま使う。新しい認証方式は作らない。
-     SNSのユーザーIDは常に auth.uid()（＝アプリ側の state.auth）。
-   ・戻り値は必ず {data, error} の形。error は「ユーザーに見せる日本語」。
-     画面側は error を出して再試行ボタンを見せるだけでよい（§17）。
-   ・埋め込み(select の join)は使わず、必要なテーブルを個別に引く。
-     マイグレーション直後にPostgRESTのスキーマキャッシュが古いと
-     join構文が失敗することがあるため、確実に動くほうを選んでいる。
-   ═══════════════════════════════════════════════════════════════════════════ */
 const SNS_PAGE_SIZE=30;              // タイムライン1ページの件数
 const SNS_POST_MAX=300;              // 投稿本文の上限(DBのCHECKと同じ)
 const SNS_COMMENT_MAX=200;           // コメントの上限(DBのCHECKと同じ)
 
-/* ═══════════════ 【v51.2新規追加】SNS投稿写真（1投稿につき最大1枚） ═══════════════
-   ・保存先は Supabase Storage の private バケット「post-images」
-     パスは {自分のuser_id}/{ランダムuuid}.jpg。DBの posts.image_path にはこのパスだけを保存する
-     （公開URLは保存しない。表示のたびに期限付きの署名URLを発行する）
-   ・誰が見られるかは Storage の RLS が決める（本人／公開アカウントの削除されていない投稿のみ）
-   ・画像はブラウザで長辺1600px以下のJPEGに作り直してから送る
-     （作り直すので、位置情報などの撮影データ(EXIF)は送られない）
-   ・運動記録の写真は「タイムラインに投稿する」を押したときだけ送る。記録しただけでは送らない
-   ・migration 未適用の環境では image_path 列が無いので、従来の列だけで読み直す */
+
 const SNS_POST_COLS='id,user_id,body,activity_type,created_at';
 const SNS_POST_COLS_IMG=SNS_POST_COLS+',image_path';
 let   SNS_HAS_IMAGE_COL=true;
@@ -4815,17 +4885,7 @@ function snsGuard(uid){
   return null;
 }
 
-/* ── プロフィール ────────────────────────────────────────────────────────
-   投稿・コメント・フォローは profiles を参照するため、行が無いと書き込めない。
-   サインアップ時のトリガーでも作られるが、既存ユーザーのために毎回念のため入れる。
 
-   full=false（既定・投稿やリアクションの直前に呼ばれる）:
-     「行があることを保証する」のが目的。中身が入っている項目だけを書き、
-     空の値でサーバー側のプロフィールを上書きしない。
-     ※ここを無条件upsertにすると、端末のstate.userが空のときに
-       サーバーの自己紹介や都道府県を消してしまう。
-   full=true（プロフィール編集画面の保存）:
-     ユーザーが自分で消した項目も反映したいので、空も含めてそのまま書く。 */
 async function snsEnsureProfile(uid,user,opts){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   const full=!!(opts&&opts.full);
@@ -4849,16 +4909,7 @@ async function snsEnsureProfile(uid,user,opts){
   }catch(e){return snsNg(e,t('sns.errProfile'));}
 }
 
-/* ═══════════════ 【v51.4新規追加】非公開アカウント対応の取得ヘルパー ═══════════════
-   v51.4 の Supabase では、profiles の行は「自分 or 公開アカウント」しか読めません。
-   ただし、公開ユーザーの投稿に非公開ユーザーがコメントした場合などに
-   名前とアイコンが消えてしまわないよう、DB側に
 
-     public_profiles … id / nickname / avatar_url だけを返すVIEW
-     yt_follow_counts(target) … フォロー数・フォロワー数の「件数だけ」を返す関数
-
-   を用意してあります。どちらもまだ無いDB（migration未適用）では、
-   自動的に v51.3 までと同じ取得方法へ戻るので、アプリだけ先に公開しても壊れません。 */
 let SNS_HAS_PUBLIC_VIEW=true;
 let SNS_HAS_FOLLOW_RPC=true;
 function snsIsMissingRelation(e){
@@ -4936,10 +4987,7 @@ async function snsFetchUserCounts(uid,targetId){
   }catch(e){return snsNg(e,t('sns.errCount'));}
 }
 
-/* ── タイムライン ────────────────────────────────────────────────────────
-   mode: 'all'（新着順の全体） / 'following'（フォロー中の人だけ）
-   将来 'recommend'（おすすめ）や 'region'（地域）を足せるよう、
-   ここで候補のuser_idを絞ってから同じ描画に流す形にしてある(§10)。 */
+
 async function snsFetchTimeline(uid,mode){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
@@ -5051,15 +5099,14 @@ async function snsCreatePost(uid,{body,activityType,imageBlob},user){
 async function snsSoftDeletePost(uid,postId,imagePath){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   try{
-    /* 【v51.2】写真つき投稿は、投稿を非表示(is_deleted)にしたうえで写真ファイルも消す。
-       投稿の復元機能は無いため、写真だけがサーバーに残り続けないようにする。
-       写真の削除に失敗しても、投稿の削除は成立させる（他人からはRLSで見えない）。 */
+    
     const own=snsIsOwnImagePath(uid,imagePath);
+    if(own&&!(await snsRemovePostImage(uid,imagePath)))
+      throw new Error('post image remove failed');
     const patch=own?{is_deleted:true,image_path:null}:{is_deleted:true};
     const {error}=await supabaseClient.from('posts')
       .update(patch).eq('id',postId).eq('user_id',uid);
     if(error)throw error;
-    if(own)await snsRemovePostImage(uid,imagePath);
     return snsOk(true);
   }catch(e){return snsNg(e,'削除できなかったみたい🐼');}
 }
@@ -5164,13 +5211,7 @@ async function snsSetFollow(uid,targetId,on,user){
   }catch(e){return snsNg(e,'フォローを更新できなかったみたい🐼');}
 }
 
-/* ═══════════════ 【v50新規追加】SNS安全機能（通報・ブロック） ═══════════════
-   方針:
-     ・既存のSNS関数の書き方（{data,error} を返す・error はユーザーに見せる文言）に合わせる
-     ・reports / blocks が未作成の環境でも、SNSはこれまでどおり動く
-       （ブロック0件として扱い、通報だけがエラーになる）
-     ・reports はクライアントからSELECTできない。書き込みだけができる。
-   ═══════════════════════════════════════════════════════════════════════════ */
+
 
 /* ブロック中のユーザーIDの一覧。タイムライン取得のたびに読み直す。
    Setはモジュール内に1つだけ持ち、描画側は snsIsBlockedId() で見るだけにする。 */
@@ -5269,16 +5310,7 @@ async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   }
 }
 
-/* ═══════════════ 【v50.1新規追加】投稿前の軽い安全対策 ═══════════════
-   目的は「明らかに危険・攻撃的な投稿を完全放置しないこと」だけ。
-   AIモデレーション・外部Moderation API・巨大NGワード辞書は使わない。
-   v50の通報／ブロックを置き換えるものではなく、その補助として足すだけ。
 
-   ここで行うのは次の3つ。
-     ① 連投防止（投稿10秒 / コメント5秒）
-     ② 空白だけの投稿・コメントの防止（既存のtrim処理をそのまま活かす）
-     ③ 明白に危険な「フレーズ」だけの拒否
-   ═══════════════════════════════════════════════════════════════════ */
 
 /* ── ① 連投防止 ─────────────────────────────────────────────────
    保存はメモリ上だけ。localStorage には新しいキーを増やさない。
@@ -5298,17 +5330,7 @@ function snsCooldownLeft(kind){
 /* 送信が「成功したときだけ」呼ぶ。失敗した投稿でクールダウンさせない。 */
 function snsMarkSent(kind){ YT_LAST_SENT_AT[kind]=Date.now(); }
 
-/* ── ③ 明白に危険なフレーズ ────────────────────────────────────
-   方針（過剰フィルタを避けるため、ここは意図的に狭くしている）:
-     ・1単語だけの一致では判定しない。危険性が明確なフレーズ単位にする
-     ・「死ぬほど疲れた」「筋トレで殺された（笑）」「殺しにくるメニュー」
-       のような、運動アプリでよくある比喩は必ず通す
-     ・政治／宗教／ネガティブ感情／悪口全般／医療／ダイエット／ラーメン／
-       飲酒／軽い冗談は一切対象にしない
-   対象は次の3カテゴリのみ。
-     A. 明白な殺害・傷害の予告
-     B. 自傷を直接促す表現
-     C. 他人への重大な暴力を具体的に促す表現 */
+
 const SNS_DANGER_PATTERNS=[
   /* ── 日本語 ── */
   /殺してやる/,            // A（「殺された」「殺しにくる」は対象外）
@@ -5347,19 +5369,7 @@ function snsHasDangerPhrase(text){
   return false;
 }
 
-/* ═══════════════ 【v50.2新規追加】「記録して投稿」の自動生成本文 ═══════════════
-   ・日本語モードの出来上がりは v50.1 と完全に同一
-       ウォーキング → 「ウォーキングをやったよ〜」
-       その他       → 「その他をやったよ〜」
-       種別なし     → 「ちょっとだけ動いた〜」
-   ・英語モードは運動種別ごとに自然な言い回しにする
-       walking / running / stretching / gym training / home workout
-       その他       → 「Got a little movement in today~」
-       種別なし     → 「Moved a little today~」
-   ・作成した本文は「投稿した時点の言語」でそのままDBへ保存する。
-     保存済みの過去投稿には一切手を入れない（翻訳もUPDATEもしない）。
-   ・fallback（種別を取得できないとき）の発生条件は v50.1 から変更していない。
-     変わったのは文言が日英になったことだけ。 */
+
 function snsAutoPostBody(act){
   if(!act)return t('sns.autoPostFallback');
   if(act.id==='other')return t('sns.autoPostOther');
@@ -5368,10 +5378,7 @@ function snsAutoPostBody(act){
   return t('sns.autoPost',{act:name});
 }
 
-/* ═══════════════ 【v50新規追加】アカウント削除 ═══════════════
-   Supabase Edge Function（supabase/functions/delete-account）を呼ぶだけ。
-   service_role key はここには存在しない（サーバー側のsecretのみ）。
-   本人確認は Edge Function 側が Authorization の JWT で行う。 */
+
 async function ytDeleteAccount(uid){
   if(!supabaseClient)return {data:null,error:t('legal.delFail')};
   if(!uid||uid==='guest')return {data:null,error:t('legal.delNeedLogin')};
@@ -5397,7 +5404,8 @@ function ytClearLocalDataForUser(uid){
     'yurutore_room_seen_unlocks_v1_'+id,
     'yurutore_panda_stats_v1_'+id,
     'yurutore_daily_visit_v1_'+id,
-    'yurutore_room_talklog_v1'     // パンジローとの会話ログ（本人の内容）
+    'yurutore_room_talklog_v1',    // 旧・共通の会話ログ（v51.4.5以降は読み込まない。退会時は従来どおり削除）
+    'yurutore_room_talklog_v1_'+id // 【v51.4.5】退会した本人の会話ログ（ユーザー別キー）
   ];
   keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
   try{ if(window.storage&&window.storage.remove){
@@ -5406,6 +5414,18 @@ function ytClearLocalDataForUser(uid){
   } }catch(e){}
   /* セッション系（ウェルカム画面をもう一度出す） */
   try{ sessionStorage.removeItem('yurutore_welcome_seen_v13'); }catch(e){}
+}
+
+
+function ytResetGuestRoomIfFresh(s){
+  try{
+    const x=s||{};
+    const empty=v=>!v||(Array.isArray(v)?v.length===0:Object.keys(v).length===0);
+    if(!(empty(x.reports)&&empty(x.completedMissions)&&empty(x.missionHistory)&&!(x.pandaPoints>0)&&empty(x.pandaChats)&&empty(x.timeCapsules)))return;
+    localStorage.removeItem(roomUnlockKey('guest'));
+    localStorage.removeItem(pandaStatsKey('guest'));
+    localStorage.removeItem(roomTalkLogKey('guest')); // 【v51.4.5】前回の体験版の会話ログも片付ける
+  }catch(e){}
 }
 
 /* 表示用の小さなヘルパー */
@@ -5585,6 +5605,8 @@ function AppLogic({devId}){
   const platform=useContext(DevCtx);
   const [st,setSt]=useState(null);
   const [session,setSession]=useState(null);
+  const [passwordRecovery,setPasswordRecovery]=useState(YT_RECOVERY_RETURN);
+  const [recoveryUserId,setRecoveryUserId]=useState(null);
   const [authChecked,setAuthChecked]=useState(false);
   const [authLoading,setAuthLoading]=useState(false);
   const [authError,setAuthError]=useState('');
@@ -5625,13 +5647,24 @@ function AppLogic({devId}){
     supabaseClient.auth.getSession()
       .then(({data})=>{
         if(!alive)return;
-        setSession((data&&data.session)||null);
+        const next=(data&&data.session)||null;
+        if(next&&ytRecoveryPending(next.user.id)){setPasswordRecovery(true);setRecoveryUserId(next.user.id);}
+        setSession(next);
         if(data&&data.session)cleanAuthUrl();   // OAuthから戻った直後のURLを整える
       })
       .catch(()=>{})
       .finally(()=>{ if(alive)setAuthChecked(true); });
     const {data:{subscription}}=supabaseClient.auth.onAuthStateChange((_event,nextSession)=>{
       if(!alive)return;
+      if(_event==='PASSWORD_RECOVERY'){
+        setRecoveryUserId(nextSession&&nextSession.user&&nextSession.user.id);
+        ytRecoveryRemember(nextSession&&nextSession.user&&nextSession.user.id);
+        setPasswordRecovery(true);
+      }else if(_event==='SIGNED_OUT'){
+        setRecoveryUserId(null);
+        ytRecoveryRemember(null);
+      }
+      avatarResetCache(nextSession&&nextSession.user&&nextSession.user.id);   // 【v51.4.7】別の人の画像キャッシュを持ち越さない
       setSession(nextSession||null);
       setAuthChecked(true);
       if(nextSession)cleanAuthUrl();
@@ -5679,6 +5712,8 @@ function AppLogic({devId}){
   },[st,devId,session?.user?.id]);
 
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
+
+  if(passwordRecovery)return <PasswordRecoveryScreen session={session?.user?.id===recoveryUserId?session:null} onDone={()=>{ytRecoveryRemember(null);setPasswordRecovery(false);}}/>;
 
   const showToast=m=>{setToast(m);setTimeout(()=>setToast(cur=>cur===m?null:cur),1900)};   /* 【v51.2】別のトーストは消さない */
 
@@ -5986,7 +6021,7 @@ function AppLogic({devId}){
     // ① ウェルカム画面（世界観の紹介 ＋「ログイン・新規登録はこちら」）
     if(showWelcomeGate)return<WelcomeGate onContinue={closeWelcomeGate} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice}/>;
     // ② 登録／ログイン／初期設定
-    if(showAuthFlow)return<RegisterScreen onDone={u=>{setForceAuthScreen(false);setSt(s=>({...s,user:u,onboard:true}));}} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
+    if(showAuthFlow)return<RegisterScreen onDone={u=>{if(!isSignedIn)ytResetGuestRoomIfFresh(st);setForceAuthScreen(false);setSt(s=>({...s,user:u,onboard:true}));}} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
   }
 
   /* 【v43.1】ログインが成立した直後の“ひと呼吸”。
@@ -6186,6 +6221,41 @@ function LangSwitch({compact}){
       <button type="button" className={lang==='en'?'on':''} onClick={()=>ytSetLang('en')} lang="en">English</button>
     </div>
   );
+}
+
+// Recovery is handled before home/onboarding; the SDK validates the authenticated update.
+function PasswordRecoveryScreen({session,onDone}){
+  const ja=ytGetLang()==='ja';
+  const [password,setPassword]=useState(''),[confirm,setConfirm]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+  const lock=useRef(false);
+  const text=(j,e)=>ja?j:e;
+  const submit=async e=>{
+    e.preventDefault();if(lock.current)return;setError('');
+    if(!session||!session.user||!supabaseClient){setError(text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.'));return;}
+    if(password.length<8){setError(text('パスワードは8文字以上で入力してください。','Use at least 8 characters.'));return;}
+    if(password!==confirm){setError(text('確認用パスワードが一致しません。','Passwords do not match.'));return;}
+    lock.current=true;setBusy(true);
+    try{
+      const {error}=await supabaseClient.auth.updateUser({password});
+      if(error)throw error;
+      setPassword('');setConfirm('');setSaved(true);ytRecoveryRemember(null);
+    }catch(e){setError(text('保存できませんでした。通信状態やリンクの期限を確認し、もう一度お試しください。','Could not save. Check your connection and link expiry, then try again.'));}
+    finally{lock.current=false;setBusy(false);}
+  };
+  return <div style={{padding:24,maxWidth:420,margin:'auto',width:'100%',boxSizing:'border-box'}}>
+    <h1 style={{fontSize:22}}>{text('パスワードを再設定','Reset your password')}</h1>
+    {saved?<><p role="status">{text('新しいパスワードを保存しました。','Your new password has been saved.')}</p><button className="btn" onClick={onDone}>{text('続ける','Continue')}</button></>:
+    !session?.user?<><p role="alert">{text('リンクが無効か期限切れです。再設定メールを送り直してください。','This link is invalid or expired. Request another reset email.')}</p><button className="btn" onClick={onDone}>{text('戻る','Back')}</button></>:
+    <form onSubmit={submit}>
+      <label className="lbl" htmlFor="recovery-password">{text('新しいパスワード','New password')}</label>
+      <input id="recovery-password" className="field" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/>
+      <label className="lbl" htmlFor="recovery-confirm">{text('新しいパスワード（確認）','Confirm new password')}</label>
+      <input id="recovery-confirm" className="field" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy}/>
+      {error&&<p role="alert">{error}</p>}
+      <button className="btn" type="submit" disabled={busy}>{text(busy?'保存中…':'パスワードを保存',busy?'Saving…':'Save password')}</button>
+    </form>}
+  </div>;
 }
 
 function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPassword,authLoading,authError,authNotice}){
@@ -6717,7 +6787,8 @@ function HomeScreen({state,setState,streak,pct,aiLoad,onOpenReport,openRoomSigna
 
       {/* ④ 今日のひとこと（v26：簡潔版カード。365日データと自動切替処理はそのまま利用） */}
       <div className="card home-daily-simple">
-        <div className="home-daily-label">{t('home.dailyLabel')} <span>{t('home.dailyDay',{n:daily365.day})}</span></div>
+        {/* 【v51.4.4】「365日中○日目」(日英とも)は継続日数と誤解されやすいため表示のみ削除。本文の決定ロジック(daily365Message)は無変更 */}
+        <div className="home-daily-label">{t('home.dailyLabel')}</div>
         <div className="home-daily-text">{daily365.text}</div>
       </div>
 
@@ -7742,9 +7813,13 @@ function trackEvent(ev){
    万一v29表示へ戻したい場合のロールバック用に定数だけ残置。 */
 const ROOM_BG_SRC='room_bg_v29_base.png';
 
-/* レベル計算の統一関数(これ以外の場所でレベルを計算しない) */
+/* レベル計算の統一関数(これ以外の場所でレベルを計算しない)
+   【v51.4.4】n には最初からある基本3点(ラグ・ローテーブル・座布団)が必ず含まれるため、
+   旧判定(n<=2でLv.1)では実績0件の新規ユーザーでも n=3 → Lv.2 から始まっていた。
+   基本3点だけ(=実績0件)の状態を Lv.1 とする。n>=4(実績1件以上)の判定は従来と完全に同じ。 */
+const ROOM_BASE_ITEM_COUNT=3;
 function roomLevelOf(n){
-  if(n<=2)return 1;
+  if(n<=ROOM_BASE_ITEM_COUNT)return 1;
   if(n<=4)return 2;
   if(n<=6)return 3;
   if(n<=8)return 4;
@@ -9325,8 +9400,11 @@ function usePanjiro47Life({bandId,enabled,exercisedToday,justRecorded,forcePose}
 const ROOM_TODAY_ACCENT_TARGETS=['rug','zabuton','table'];
 function roomTodayAccentTarget(){return ROOM_TODAY_ACCENT_TARGETS[roomTodaySeed()%ROOM_TODAY_ACCENT_TARGETS.length];}
 function roomTodayAccentClass(id){return 'accent-'+id;} // 家具idから固定クラス
-function loadRoomTalkLog(){try{const a=JSON.parse(localStorage.getItem(ROOM_TALKLOG_KEY)||'[]');return Array.isArray(a)?a:[];}catch(e){return[];}}
-function pushRoomTalkLog(text){try{const a=loadRoomTalkLog();a.unshift({text:String(text||''),ts:Date.now()});localStorage.setItem(ROOM_TALKLOG_KEY,JSON.stringify(a.slice(0,30)));}catch(e){}}
+/* 【v51.4.5】会話ログをユーザー別キーに分離: yurutore_room_talklog_v1_{userId|guest}
+   旧共通キー(ROOM_TALKLOG_KEY そのもの)は誰のログか判別できないため、読み込まず・移行もしない。 */
+function roomTalkLogKey(uid){return ROOM_TALKLOG_KEY+'_'+(uid||'guest');}
+function loadRoomTalkLog(uid){try{const a=JSON.parse(localStorage.getItem(roomTalkLogKey(uid))||'[]');return Array.isArray(a)?a:[];}catch(e){return[];}}
+function pushRoomTalkLog(text,uid){try{const a=loadRoomTalkLog(uid);a.unshift({text:String(text||''),ts:Date.now()});localStorage.setItem(roomTalkLogKey(uid),JSON.stringify(a.slice(0,30)));}catch(e){}}
 function loadRoomSettings(){try{const s=JSON.parse(localStorage.getItem(ROOM_SETTINGS_KEY)||'{}');return{...ROOM_SETTINGS_DEFAULT,...(s&&typeof s==='object'?s:{})};}catch(e){return{...ROOM_SETTINGS_DEFAULT};}}
 function saveRoomSettings(s){try{localStorage.setItem(ROOM_SETTINGS_KEY,JSON.stringify(s));}catch(e){}}
 function isRoomNightNow(){const h=new Date().getHours();return h>=18||h<6;}
@@ -9465,7 +9543,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
     setSpeechOpen(true); // 【v30】発言時のみ会話ボックスを表示
     if(!spokenRef.current.has(text)){
       spokenRef.current.add(text);
-      pushRoomTalkLog(text);
+      pushRoomTalkLog(text,state&&state.auth); // 【v51.4.5】ユーザー別キーへ保存
       recordTalkStat(state&&state.auth); // 【v30】talkTotal+1 / talkDaysは同日1回
     }
   };
@@ -9769,7 +9847,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
   // 【v27新規追加】画像内メニューのタップ処理
   const onHotspot=(e,id)=>{
     e.stopPropagation(); // 背景の会話変更と二重発火しないように
-    if(id==='talklog'){setTalkLog(loadRoomTalkLog());setModal('talklog');return;}
+    if(id==='talklog'){setTalkLog(loadRoomTalkLog(state&&state.auth));setModal('talklog');return;}
     if(id==='album'){setModal('album');return;}
     if(id==='settings'){setModal('settings');return;}
     if(id==='mission'){setModal('mission');return;}
@@ -10675,9 +10753,8 @@ function BlockedUsersPanelV50({state,showToast}){
             return(
               <div key={r.blocked_id} style={{display:'flex',alignItems:'center',gap:9,padding:'8px 0',
                                               borderTop:'1px solid #f0f7f5'}}>
-                {p&&p.avatar_url
-                  ?<img src={p.avatar_url} className="avatar" style={{objectFit:'cover'}} alt=""/>
-                  :<div className="avatar" style={{background:snsColorOf(r.blocked_id)}}>{snsInitial(p,nm)}</div>}
+                <SnsAvatar value={p&&p.avatar_url} className="avatar" style={{objectFit:'cover'}}
+                  fallback={<div className="avatar" style={{background:snsColorOf(r.blocked_id)}}>{snsInitial(p,nm)}</div>}/>
                 <div style={{flex:1,minWidth:0,fontSize:13,fontWeight:700,color:'#1a4038',
                              overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{nm}</div>
                 <button type="button" disabled={busyId===r.blocked_id} onClick={()=>unblock(r.blocked_id)}
@@ -10974,7 +11051,9 @@ function SnsPostCard({post,me,state,author,initialReactions,initialCommentCount,
   const [blockErr,setBlockErr]=useState('');
 
   const name=snsDisplayName(author,isMine?(state.user&&state.user.name):null);
-  const avatar=(author&&author.avatar_url)||(isMine&&state.user&&(state.user.avatarUrl||state.user.avatar))||null;
+  /* 【v51.4.7】他人の画像は Storage から権限つきで取得（取得不可なら既定アイコン）。本人は端末の画像を優先 */
+  const avatar=useAvatarSrc((author&&author.avatar_url)||(isMine&&state.user&&state.user.avatarUrl)||null,
+                            isMine?selfAvatarLocal(state.user):null);
 
   const toggle=async(r)=>{
     if(busyType)return;
@@ -11209,7 +11288,9 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
   };
 
   const name=snsDisplayName(prof,isMe?(state.user&&state.user.name):null);
-  const avatar=(prof&&prof.avatar_url)||(isMe&&state.user&&(state.user.avatarUrl||state.user.avatar))||null;
+  /* 【v51.4.7】他人の画像は Storage から権限つきで取得（取得不可なら既定アイコン）。本人は端末の画像を優先 */
+  const avatar=useAvatarSrc((prof&&prof.avatar_url)||(isMe&&state.user&&state.user.avatarUrl)||null,
+                            isMe?selfAvatarLocal(state.user):null);
 
   return(
     <div className="room-full-view">
@@ -11556,7 +11637,14 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
       if(avatarChanged&&avatar){
         // ログイン中ならSupabase Storageへアップロード（失敗してもdataURLで表示継続）
         avatarUrl=await uploadAvatarToSupabase(state.auth,avatar);
-      }else if(!avatar){avatarUrl=null;}
+      }else if(!avatar){
+        // 【v51.4.7】画像を消したときは Storage のファイルも削除する。失敗したら保存しない（再試行できる）。
+        if((state.user.avatar||state.user.avatarUrl)&&!(await removeAvatarFromSupabase(state.auth))){
+          setAvatarErr(t('photo.saveErr'));
+          return;
+        }
+        avatarUrl=null;
+      }
       const nextUser={...state.user,
         name:name.trim(),bio:bio.trim(),intro:intro.trim(),
         avatar:avatar||null,avatarUrl,
@@ -11672,20 +11760,17 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
       </div>
       <div style={{padding:'0 13px'}}>
         <div className="stat-row">
-          <div className="stat-box"><div className="stat-num">{since||47}</div><div className="stat-unit">{t('profile.statDays')}</div></div>
-          <div className="stat-box"><div className="stat-num">{total||38}</div><div className="stat-unit">{t('profile.statCount')}</div></div>
-          <div className="stat-box"><div className="stat-num">{Object.values(state.likes).filter(Boolean).length||12}</div><div className="stat-unit">{t('profile.statCheer')}</div></div>
+          <div className="stat-box"><div className="stat-num">{since}</div><div className="stat-unit">{t('profile.statDays')}</div></div>
+          <div className="stat-box"><div className="stat-num">{total}</div><div className="stat-unit">{t('profile.statCount')}</div></div>
+          <div className="stat-box"><div className="stat-num">{Object.values(state.likes).filter(Boolean).length}</div><div className="stat-unit">{t('profile.statCheer')}</div></div>
         </div>
         <div className="card" style={{background:'linear-gradient(135deg,#ecfaf5,#d4f0e8)'}}>
-          <div style={{fontSize:13,color:'#1a3030',lineHeight:1.8,fontStyle:'italic',textAlign:'center'}}>{t('ui.pfSince',{days:(since||47),name:state.user.name})}</div>
+          <div style={{fontSize:13,color:'#1a3030',lineHeight:1.8,fontStyle:'italic',textAlign:'center'}}>{total===0?t('ui.pfNoRecord'):since===0?t('ui.pfStartedToday',{name:state.user.name}):t('ui.pfSince',{days:since,name:state.user.name})}</div>
         </div>
         <div className="card">
           <div className="card-title">{t('home.recentTitle')}</div>
           {state.reports.length===0?(
-            <>
-              <div className="rec-row"><div><div style={{fontSize:13,fontWeight:600,color:'#1a3030'}}>🚶 {tl(ACTS[0])}</div><div style={{fontSize:11,color:'#a0b8b0',marginTop:1}}>{t('demo.today')}</div></div><span className="rec-tag">{t('misc.minutes',{n:30})}</span></div>
-              <div className="rec-row"><div><div style={{fontSize:13,fontWeight:600,color:'#1a3030'}}>🧘 {tl(ACTS[2])}</div><div style={{fontSize:11,color:'#a0b8b0',marginTop:1}}>{t('demo.yest')}</div></div><span className="rec-tag">{t('misc.minutes',{n:15})}</span></div>
-            </>
+            <div style={{fontSize:13,color:'#a0b8b0',padding:'12px 0'}}>{t('home.noRecord')}</div>
           ):(
             state.reports.slice(-4).reverse().map(r=>{const a=ACTS.find(x=>x.id===r.aid);return(
               <div key={r.id} className="rec-row">
@@ -11905,7 +11990,10 @@ function BuildStamp(){
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+
+
 </script>
 
 </body>
 </html>
+

@@ -1,0 +1,8 @@
+{
+  "name": "yurutoreclub-browser-tools",
+  "private": true,
+  "dependencies": {
+    "playwright": "1.64.0",
+    "@babel/standalone": "7.24.7"
+  }
+}

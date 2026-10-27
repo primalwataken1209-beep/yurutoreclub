@@ -1,0 +1,53 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ゆるトレ倶楽部 v51.2 — 【任意】user_progress に残っている写真データの除去
+--   supabase/manual/v51_2_optional_user_progress_photo_scrub.sql
+--
+-- 背景：
+--   v51.1 までのアプリは、ログイン中の状態の控え（public.user_progress.data）に
+--   運動記録・タイムカプセルの写真（dataURL）をそのまま含めて送っていました
+--   （user_progress テーブルが存在する環境のみ）。
+--   v51.2 のアプリは写真の中身を送らず「写真あり」の目印だけを送ります。
+--   アプリを開いた利用者の行は次回保存で自動的に置き換わりますが、
+--   しばらく開いていない利用者の行には古い写真データが残ります。
+--
+-- 使い方：
+--   ① まず「確認」だけ実行して件数を見る（何も変更しません）
+--   ② 必要と判断した場合のみ「実行」ブロックのコメントを外して実行
+--   ※ 端末内（各利用者のスマホ）の写真には一切影響しません。
+--   ※ user_progress テーブルが無い環境では ① がエラーになります（＝対応不要）。
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ① 確認（読み取りのみ）
+select count(*) as rows_with_photo_data
+from public.user_progress
+where data::text like '%data:image%';
+
+-- ② 実行（任意）— reports[].photo / timeCapsules[].photo を {w,h,localOnly:true} に置き換える
+-- begin;
+-- update public.user_progress up
+-- set data = up.data
+--   || jsonb_build_object(
+--        'reports',
+--        coalesce((
+--          select jsonb_agg(
+--                   case when jsonb_typeof(r->'photo') = 'object'
+--                        then jsonb_set(r, '{photo}', jsonb_build_object('w', r->'photo'->'w', 'h', r->'photo'->'h', 'localOnly', true))
+--                        else r end
+--                   order by ord)
+--          from jsonb_array_elements(case when jsonb_typeof(up.data->'reports') = 'array' then up.data->'reports' else '[]'::jsonb end)
+--               with ordinality as t(r, ord)
+--        ), '[]'::jsonb),
+--        'timeCapsules',
+--        coalesce((
+--          select jsonb_agg(
+--                   case when jsonb_typeof(c->'photo') = 'object'
+--                        then jsonb_set(c, '{photo}', jsonb_build_object('w', c->'photo'->'w', 'h', c->'photo'->'h', 'localOnly', true))
+--                        else c end
+--                   order by ord)
+--          from jsonb_array_elements(case when jsonb_typeof(up.data->'timeCapsules') = 'array' then up.data->'timeCapsules' else '[]'::jsonb end)
+--               with ordinality as t(c, ord)
+--        ), '[]'::jsonb)
+--      )
+-- where up.data::text like '%data:image%';
+-- -- 確認して問題なければ commit、やめるなら rollback
+-- commit;
