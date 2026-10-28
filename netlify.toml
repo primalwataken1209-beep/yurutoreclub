@@ -5,7 +5,7 @@
   publish = "dist"
 
 [context.production]
-  command = "node scripts/build-public.cjs"
+  command = "node scripts/netlify-build.cjs"
 
 [context.deploy-preview]
   command = "node scripts/block-preflight-deploy.cjs"
