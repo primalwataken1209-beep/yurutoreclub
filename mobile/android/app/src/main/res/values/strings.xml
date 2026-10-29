@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ゆるトレ倶楽部 STG</string>
+    <string name="title_activity_main">ゆるトレ倶楽部 STG</string>
+    <string name="package_name">club.yurutore.dev.placeholder</string>
+    <string name="custom_url_scheme">club.yurutore.dev.placeholder</string>
+</resources>
