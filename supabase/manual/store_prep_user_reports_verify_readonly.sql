@@ -3,17 +3,22 @@
 --   適用前・適用後のどちらでも実行できます。結果は保存しておいてください。
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ① reports のポリシー
---   適用前の期待値：INSERT "reports: insert own" の1件だけ。with_check = (reporter_user_id = auth.uid())
---   適用後の期待値：同じ名前の1件だけ。with_check に target_type と public_profiles が含まれる
---   どちらでも SELECT / UPDATE / DELETE のポリシーは0件であること
-select policyname, cmd, roles, qual, with_check
+-- ① reports のポリシー（全件）
+--   適用前の期待値：INSERT "staging reports insert own" の1件だけ。
+--     with_check = (reporter_user_id = auth.uid()) AND (status = 'open')
+--   適用後の期待値：INSERT "reports: insert own" の1件だけ。
+--     with_check に status = 'open'、target_type、public_profiles が含まれる
+--   どちらでも SELECT / UPDATE / DELETE / ALL のポリシーは0件であること。
+--   これ以外のポリシーがあれば、差分案は中止する（想定外のため）。
+select policyname, permissive, cmd, roles, qual, with_check
 from pg_policies
 where schemaname = 'public' and tablename = 'reports'
 order by cmd, policyname;
 
--- ② target_type の CHECK 制約
+-- ② CHECK 制約（全件）
+--   target_type を含む CHECK は1件だけで、名前は reports_target_type_check
 --   適用前：('post','comment')　適用後：('post','comment','user')
+--   reports_status_check（open/reviewed/actioned/dismissed）と note の長さ制限は変わらないこと
 select conname, pg_get_constraintdef(oid) as definition
 from pg_constraint
 where conrelid = 'public.reports'::regclass and contype = 'c'

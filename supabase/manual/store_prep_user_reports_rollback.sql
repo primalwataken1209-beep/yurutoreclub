@@ -1,5 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- ストア準備: ユーザー通報の差分を v50 の定義へ戻す
+-- ストア準備: ユーザー通報の差分を、2026-10-29 に確認した現在の定義へ戻す
+--   CHECK  reports_target_type_check : ('post','comment')
+--   INSERT "staging reports insert own" : reporter_user_id = auth.uid() and status = 'open'
 --
 -- 【本番で実行する場合は別途承認が必要】
 -- ユーザー通報（target_type = 'user'）が1件でもあると、CHECK を戻せないため中止します。
@@ -15,13 +17,13 @@ begin
   end if;
 end $$;
 
-alter table public.reports drop constraint if exists reports_target_type_valid;
-alter table public.reports add  constraint reports_target_type_valid
+alter table public.reports drop constraint if exists reports_target_type_check;
+alter table public.reports add  constraint reports_target_type_check
   check (target_type in ('post','comment'));
 
 drop policy if exists "reports: insert own" on public.reports;
-create policy "reports: insert own" on public.reports
+create policy "staging reports insert own" on public.reports
   for insert to authenticated
-  with check (reporter_user_id = auth.uid());
+  with check (reporter_user_id = auth.uid() and status = 'open');
 
 commit;
