@@ -220,7 +220,7 @@ ja:{
     delFailContact:'解決しない場合はお問い合わせください',
     delNeedLogin:'アカウントの削除にはログインが必要だよ🐼',
     menuAria:'この投稿のメニュー',
-    report:'この投稿を通報', reportComment:'このコメントを通報',
+    report:'この投稿を通報', reportComment:'このコメントを通報', reportUser:'このユーザーを通報',
     reportTitle:'通報する', reportSub:'どんな内容か教えてね。運営だけが確認します。',
     reasonHarassment:'嫌がらせ・誹謗中傷', reasonInappropriate:'不適切な内容',
     reasonSpam:'スパム', reasonPersonal:'個人情報',
@@ -228,7 +228,7 @@ ja:{
     reportNotePh:'補足があれば書いてね（任意）',
     reportSend:'通報する', reportSending:'送信中…',
     reportDone:'通報を受け付けたよ。ありがとう🐼',
-    reportDup:'この投稿はすでに通報済みだよ🐼',
+    reportDup:'この投稿はすでに通報済みだよ🐼', reportUserDup:'このユーザーはすでに通報済みだよ🐼',
     reportFail:'通報を送れなかったみたい。もう一度ためしてね🐼',
     reportNeedReason:'理由をひとつ選んでね🐼',
     block:'このユーザーをブロック', unblock:'ブロックを解除',
@@ -505,7 +505,7 @@ en:{
     delFailContact:'If this keeps happening, please contact us',
     delNeedLogin:'You need to be signed in to delete an account 🐼',
     menuAria:'Post menu',
-    report:'Report post', reportComment:'Report comment',
+    report:'Report post', reportComment:'Report comment', reportUser:'Report user',
     reportTitle:'Report', reportSub:'Tell us what the problem is. Only we can see this.',
     reasonHarassment:'Harassment or abuse', reasonInappropriate:'Inappropriate content',
     reasonSpam:'Spam', reasonPersonal:'Personal information',
@@ -513,7 +513,7 @@ en:{
     reportNotePh:'Anything else you want to add (optional)',
     reportSend:'Send report', reportSending:'Sending…',
     reportDone:'Thanks. We have received your report 🐼',
-    reportDup:'You have already reported this 🐼',
+    reportDup:'You have already reported this 🐼', reportUserDup:'You have already reported this user 🐼',
     reportFail:"We couldn't send that report. Please try again 🐼",
     reportNeedReason:'Please pick one reason 🐼',
     block:'Block this user', unblock:'Unblock',
@@ -3340,7 +3340,8 @@ async function snsSetBlock(uid,targetId,on,user){
    ・同じ対象を2回通報した場合は unique index で弾かれる → 専用の文言を返す */
 async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
-  if(['post','comment'].indexOf(targetType)<0)return {data:null,error:t('legal.reportFail')};
+  if(['post','comment','user'].indexOf(targetType)<0)return {data:null,error:t('legal.reportFail')};
+  if(targetType==='user'&&String(targetId)===String(uid))return {data:null,error:t('legal.reportFail')};
   if(!targetId)return {data:null,error:t('legal.reportFail')};
   if(!REPORT_REASONS.some(r=>r.id===reason))return {data:null,error:t('legal.reportNeedReason')};
   try{
@@ -3356,7 +3357,7 @@ async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   }catch(e){
     const code=(e&&(e.code||e.status))||'';
     const msg=String((e&&e.message)||'');
-    if(code==='23505'||/duplicate key/i.test(msg))return {data:null,error:t('legal.reportDup')};
+    if(code==='23505'||/duplicate key/i.test(msg))return {data:null,error:t(targetType==='user'?'legal.reportUserDup':'legal.reportDup')};
     return snsNg(e,t('legal.reportFail'));
   }
 }
@@ -9283,6 +9284,7 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
   const [reloadKey,setReloadKey]=useState(0);
   /* 【v50新規追加】ブロック状態 */
   const [blocked,setBlocked]=useState(()=>snsIsBlockedId(userId));
+  const [reportUserOpen,setReportUserOpen]=useState(false);
   const [blockAsk,setBlockAsk]=useState(false);
   const [blockBusy,setBlockBusy]=useState(false);
   const [blockErr,setBlockErr]=useState('');
@@ -9401,6 +9403,14 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
                   {blocked?t('legal.unblock'):t('legal.block')}
                 </button>
               )}
+              {!isMe&&me&&me!=='guest'&&(
+                <button type="button" onClick={()=>setReportUserOpen(true)}
+                  style={{marginTop:9,width:'100%',borderRadius:14,padding:'10px',fontSize:12,fontWeight:800,
+                          cursor:'pointer',fontFamily:'inherit',
+                          border:'1.5px solid #ecdcd4',background:'#fff',color:'#b9603f'}}>
+                  🚩 {t('legal.reportUser')}
+                </button>
+              )}
               {blockErr&&<div style={{fontSize:11.5,color:'#c2683f',marginTop:8}}>{blockErr}</div>}
               {err&&<div style={{fontSize:11.5,color:'#c2683f',marginTop:8}}>{err}</div>}
             </div>
@@ -9421,6 +9431,10 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
           </>
         )}
       </div>
+      {reportUserOpen&&(
+        <ReportSheetV50 targetType="user" targetId={userId} me={me}
+          showToast={showToast} onClose={()=>setReportUserOpen(false)}/>
+      )}
       {/* 【v50新規追加】ブロック確認 */}
       {blockAsk&&(
         <ConfirmSheetV50
