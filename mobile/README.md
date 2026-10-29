@@ -72,5 +72,17 @@ npm test              # この土台のテスト（ネットワーク不要）
 | アイコン・スプラッシュ | Capacitor 既定のまま | 素材の作成 |
 | Android の画面端（edge-to-edge） | 未検証 | targetSdk 36 では画面端まで描画される。既存CSSの `env(safe-area-inset-*)` が Android WebView で効くかを実機で確認する |
 | ログイン中のネット不通 | 未検証 | 体験版がオフラインで動くことは試験済み。ログイン中の表示は実機で確認する |
-| 端末保存 | 既存どおり localStorage | Android の `allowBackup="true"`（既定）では、端末のバックアップに記録とセッションが含まれうる。残すか無効にするかを決める |
-| SDK ライセンス・Gradle 同期 | 未実施 | Android Studio を開いた人が行う |
+| **運動記録の永続保存** | **提出ブロッカー（未対応）** | 記録は Web版と同じ WebView の localStorage にあり、Capacitor 公式 docs（Preferences）は OS が localStorage を消す場合があると明記している。端末内の永続保存と起動時の復元（写真を含むサイズを考慮）を設計する。Preferences は小さな設定用なので、記録や画像の保存先にはしない |
+| **ログインセッションの保存先** | **提出ブロッカー（未対応）** | SDK の既定どおり localStorage。Keychain / Keystore に保存するには公式でないプラグインの選定が必要（未承認）。強制終了・再開・トークン更新・ログアウトの実機確認と合わせて決める |
+| OS バックアップ | 対応済み | `allowBackup="false"` と data_extraction_rules で、クラウドバックアップと端末間転送から WebView の保存領域を除外（機種変更で記録は引き継がれない） |
+| セッション更新の再開 | 対応済み（実機未確認） | アプリが前面のときだけ自動更新し、背面で停止（appStateChange） |
+| Google ログイン失敗の表示 | 対応済み（実機未確認） | 戻ってきた時点の失敗（拒否・交換失敗）は画面上部に日英で表示する |
+| プライバシーマニフェスト | 下書き | `ios/App/App/PrivacyInfo.xcprivacy`（追跡なし）。収集データの種類は Work の申告下書きと最終ビルドに合わせて確定する |
+| SDK ライセンス・Gradle 同期 | 未実施（ローカル） | Android Studio を開いた人が行う。CI は GitHub 標準 runner のイメージに含まれる SDK をそのまま使い、ライセンス承諾の操作はしない |
+
+## Compile CI（`.github/workflows/mobile-compile.yml`）
+
+- 対象は PR 上の `mobile/**`・`index.html`・`app.js` の変更と、手動実行。権限は `contents: read` だけで、action は SHA で固定、各ジョブにタイムアウトを設定している。
+- 標準 runner だけを使う（`ubuntu-latest`、`macos-26`）。secret・署名・成果物のアップロード・デプロイはない。
+- 鍵はコンパイル確認用のダミーで、staging バンドルとしてビルドする。Android は署名なしの debug APK、iOS は `CODE_SIGNING_ALLOWED=NO` のシミュレータ向けビルド。
+- Gradle wrapper の jar と配布ファイルは、公式のチェックサムで確認する。

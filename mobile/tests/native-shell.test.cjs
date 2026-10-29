@@ -49,8 +49,11 @@ test('only the exact callback exchanges a code, through the build target only',a
   for(const bad of ['club.yurutore.dev.placeholder://auth/other?code=x','club.yurutore.dev.placeholder://evil/callback?code=x',
                     'other.scheme://auth/callback?code=x','https://localhost/auth/callback?code=x','not a url'])
     assert.equal(await w.YT_NATIVE.handleUrl(bad),false,bad);
+  assert.equal(w.document.querySelector('[role=alert]'),null,'ignored links show nothing');
   assert.equal(await w.YT_NATIVE.handleUrl(CALLBACK+'?error=access_denied'),true);
   assert.equal(log.fetch.length,0);
+  assert.match(w.document.getElementById('yt-native-auth-error').textContent,/ログインを完了できませんでした/);
+  w.document.getElementById('yt-native-auth-error').remove();
   assert.ok(log.listeners.appUrlOpen,'listens for app links');
   log.listeners.appUrlOpen({url:CALLBACK+'?code=abc123'});await settle();
   assert.equal(log.fetch.length,1);
@@ -58,6 +61,20 @@ test('only the exact callback exchanges a code, through the build target only',a
   assert.match(String(log.fetch[0].body),/"auth_code":"abc123"/);assert.match(String(log.fetch[0].body),/"code_verifier":"[^"]+"/);
   assert.ok(log.close>=1,'in-app browser closed');
   const {data}=await c.auth.getSession();assert.equal(data.session,null,'failed exchange leaves no session');
+  assert.ok(w.document.getElementById('yt-native-auth-error'),'failed exchange is shown to the user');
+});
+test('session refresh pauses in the background and resumes when the app returns',async t=>{
+  const {w,log}=shell(t);const calls=[];
+  w.YT_NATIVE.attach({auth:{startAutoRefresh:()=>calls.push('start'),stopAutoRefresh:()=>calls.push('stop')}});
+  assert.ok(log.listeners.appStateChange);
+  log.listeners.appStateChange({isActive:false});log.listeners.appStateChange({isActive:true});
+  assert.deepEqual(calls,['stop','start']);
+});
+test('English sign-in failure message',async t=>{
+  const {w}=shell(t);w.localStorage.setItem('yurutore_language','en');
+  w.YT_NATIVE.attach({auth:{startAutoRefresh(){},stopAutoRefresh(){},exchangeCodeForSession:async()=>({error:new Error('x')})}});
+  await w.YT_NATIVE.handleUrl(CALLBACK+'?code=zzz');
+  assert.match(w.document.getElementById('yt-native-auth-error').textContent,/Sign-in did not complete/);
 });
 test('Apple and other providers stay disabled until configured',async t=>{
   const {w,log}=shell(t);w.YT_NATIVE.attach(client(w));

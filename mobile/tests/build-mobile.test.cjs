@@ -76,13 +76,33 @@ test('native projects use the same placeholder id and callback scheme, with no s
   assert.match(gradle,new RegExp('applicationId "'+id.replace(/\./g,'\\.')+'"'));
   assert.doesNotMatch(gradle,/signingConfigs|storeFile|keyAlias/);
   assert.match(read('android/app/src/main/res/values/strings.xml'),new RegExp('<string name="custom_url_scheme">'+id+'</string>'));
-  assert.match(read('android/app/src/main/AndroidManifest.xml'),/android:scheme="@string\/custom_url_scheme" android:host="auth" android:path="\/callback"/);
+  const manifest=read('android/app/src/main/AndroidManifest.xml');
+  assert.match(manifest,/android:scheme="@string\/custom_url_scheme" android:host="auth" android:path="\/callback"/);
+  // Sessions and local records stay out of OS backup and device transfer.
+  assert.match(manifest,/android:allowBackup="false"/);assert.match(manifest,/android:dataExtractionRules="@xml\/data_extraction_rules"/);
+  const rules=read('android/app/src/main/res/xml/data_extraction_rules.xml');
+  for(const part of ['cloud-backup','device-transfer'])assert.match(rules,new RegExp('<'+part+'>[\\s\\S]*<exclude domain="root" />[\\s\\S]*</'+part+'>'));
+  const privacy=read('ios/App/App/PrivacyInfo.xcprivacy');
+  assert.match(privacy,/<key>NSPrivacyTracking<\/key>\s*<false\/>/);
+  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/PrivacyInfo\.xcprivacy in Resources/g)||[]).length,2,'privacy manifest is a bundle resource');
   const pbx=read('ios/App/App.xcodeproj/project.pbxproj');
   assert.ok(pbx.split('PRODUCT_BUNDLE_IDENTIFIER = '+id+';').length>1);
   assert.doesNotMatch(pbx,/DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER = "?[A-Za-z0-9]/);
   assert.match(read('ios/App/App/Info.plist'),new RegExp('<key>CFBundleURLSchemes</key>\\s*<array>\\s*<string>'+id.replace(/\./g,'\\.')+'</string>'));
   for(const f of ['android/app/src/main/assets/public','ios/App/App/public'])
     assert.match(read(f.startsWith('android')?'android/.gitignore':'ios/.gitignore'),new RegExp('^'+f.replace(/^(android|ios)\//,'').replace(/\//g,'\\/')+'$','m'),f+' must stay untracked');
+});
+test('compile CI is read-only, SHA-pinned, secret-free and unsigned',()=>{
+  const yml=fs.readFileSync(path.join(root,'.github','workflows','mobile-compile.yml'),'utf8').replace(/^\s*#.*$/gm,'');
+  assert.match(yml,/^permissions:\n  contents: read\n/m);
+  assert.doesNotMatch(yml,/secrets\.|pull_request_target|write-all|id-token|upload-artifact|deploy/i);
+  const uses=[...yml.matchAll(/uses: (\S+)/g)].map(m=>m[1]);
+  assert.ok(uses.length>0);for(const u of uses)assert.match(u,/@[0-9a-f]{40}$/,u);
+  for(const job of yml.split(/\n  (?=[a-z-]+:\n    )/).slice(1))assert.match(job,/timeout-minutes: \d+/);
+  assert.match(yml,/runs-on: ubuntu-latest/);assert.match(yml,/runs-on: macos-26/);
+  assert.doesNotMatch(yml,/runs-on: .*(large|xlarge|\d+-core)/);
+  assert.match(yml,/CODE_SIGNING_ALLOWED=NO/);assert.match(yml,/assembleDebug/);assert.doesNotMatch(yml,/assembleRelease|bundleRelease|archive/);
+  assert.match(yml,/--target=staging/);assert.doesNotMatch(yml,/--target=production/);
 });
 test('repository config has no server.url and keeps the placeholder id',()=>{
   const cfg=JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8'));

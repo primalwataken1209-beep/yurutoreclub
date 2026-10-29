@@ -1,0 +1,106 @@
+# Compile-only checks for the Capacitor shell in mobile/.
+# Standard GitHub-hosted runners only; no secrets, no signing, no upload, no deploy.
+# The bundle is a staging build with a compile-only placeholder key, so the result cannot reach any project.
+name: Mobile compile (unsigned, staging bundle)
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - 'index.html'
+      - 'app.js'
+      - '.github/workflows/mobile-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  YT_STAGING_PUBLISHABLE_KEY: sb_publishable_CI_COMPILE_ONLY_not_a_key
+  CI: 'true'
+
+jobs:
+  web-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+
+  android:
+    needs: web-bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify the committed Gradle wrapper against the official checksum
+        run: |
+          expected=7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172
+          echo "$expected  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+          grep -q '^distributionSha256Sum=' android/gradle/wrapper/gradle-wrapper.properties
+      - run: node scripts/build-mobile.cjs --target=staging
+      - run: npx cap sync android
+      - name: Assemble unsigned debug APK (compile check only)
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Confirm no release signing or production reference in the build
+        run: |
+          # bash -e ignores '! cmd', so fail explicitly
+          if grep -rq 'eszheiabjwehcbrteqza' android/app/src/main/assets/public; then exit 1; fi
+          if grep -Eq 'signingConfigs|storeFile' android/app/build.gradle; then exit 1; fi
+          ls -l android/app/build/outputs/apk/debug/
+
+  ios:
+    needs: web-bundle
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/build-mobile.cjs --target=staging
+      - run: npx cap sync ios
+      - run: xcodebuild -version
+      - name: Build for the simulator without code signing (compile check only)
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Confirm no production reference and the privacy manifest is bundled
+        run: |
+          if grep -rq 'eszheiabjwehcbrteqza' ios/App/App/public; then exit 1; fi
+          find "$RUNNER_TEMP/dd" -path '*App.app/PrivacyInfo.xcprivacy' | grep -q .

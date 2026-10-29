@@ -32,17 +32,30 @@
             global:{fetch:guardedFetch}};
   }
 
+  /* The web app only shows errors from the call that opened the browser, so failures on return are shown here. */
+  function authFailed(){
+    var ja=true;
+    try{ja=(localStorage.getItem('yurutore_language')||document.documentElement.lang||'ja')!=='en';}catch(e){}
+    var old=document.getElementById('yt-native-auth-error');if(old)old.remove();
+    var el=document.createElement('div');
+    el.id='yt-native-auth-error';el.setAttribute('role','alert');
+    el.textContent=ja?'ログインを完了できませんでした。もう一度お試しください。':'Sign-in did not complete. Please try again.';
+    el.style.cssText='position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:2147483647;'+
+      'background:#fff5f0;color:#a4532f;border:1.5px solid #f0c9b6;border-radius:14px;padding:12px 14px;font-size:13px;font-weight:700;';
+    el.addEventListener('click',function(){el.remove();});
+    (document.body||document.documentElement).appendChild(el);
+    setTimeout(function(){el.remove();},8000);
+  }
+
   async function handleUrl(raw){
     var u=parse(raw);
     if(!u||!sameCallback(u))return false;
     if(Browser){try{await Browser.close();}catch(e){}}
     var code=u.searchParams.get('code');
-    if(u.searchParams.get('error')||!code||!client){
-      console.warn('[native] sign-in did not complete');
-      return true;
-    }
-    var r=await client.auth.exchangeCodeForSession(code);
-    if(r&&r.error)console.warn('[native] code exchange failed');
+    if(u.searchParams.get('error')||!code||!client){authFailed();return true;}
+    var r;
+    try{r=await client.auth.exchangeCodeForSession(code);}catch(e){r={error:e};}
+    if(!r||r.error)authFailed();
     return true;
   }
 
@@ -67,6 +80,10 @@
       launchChecked=true;
       App.addListener('appUrlOpen',function(e){handleUrl(e&&e.url);});
       App.getLaunchUrl().then(function(r){if(r&&r.url)handleUrl(r.url);}).catch(function(){});
+      // Timers do not run while the app is in the background: refresh the session only while active.
+      App.addListener('appStateChange',function(s){
+        if(s&&s.isActive)c.auth.startAutoRefresh();else c.auth.stopAutoRefresh();
+      });
     }
   }
 
