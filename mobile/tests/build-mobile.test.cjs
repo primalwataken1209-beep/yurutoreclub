@@ -103,7 +103,12 @@ test('compile CI is read-only, SHA-pinned, secret-free and unsigned',()=>{
   for(const job of yml.split(/\n  (?=[a-z-]+:\n    )/).slice(1))assert.match(job,/timeout-minutes: \d+/);
   assert.match(yml,/runs-on: ubuntu-latest/);assert.match(yml,/runs-on: macos-26/);
   assert.doesNotMatch(yml,/runs-on: .*(large|xlarge|\d+-core)/);
-  assert.match(yml,/CODE_SIGNING_ALLOWED=NO/);assert.match(yml,/assembleDebug/);assert.doesNotMatch(yml,/assembleRelease|bundleRelease|archive/);
+  assert.match(yml,/CODE_SIGNING_ALLOWED=NO/);assert.match(yml,/assembleDebug/);
+  // Release AAB is built without any signing config and must be verified unsigned; no keys or archives.
+  assert.match(yml,/gradlew --no-daemon bundleRelease/);assert.match(yml,/grep -q 'jar is unsigned'/);
+  assert.match(yml,/bundletool-all-1\.18\.3\.jar[\s\S]*sha256sum -c -/);
+  assert.doesNotMatch(yml,/assembleRelease|xcodebuild[^\n]*archive|storePassword|keyAlias|storeFile=|apksigner sign|jarsigner -keystore|android\.injected\.signing/i);
+  assert.match(yml,/if grep -Eq 'signingConfigs\|storeFile' android\/app\/build\.gradle; then exit 1; fi/);
   assert.match(yml,/--target=staging/);assert.doesNotMatch(yml,/--target=production/);
 });
 test('repository config has no server.url and keeps the placeholder id',()=>{

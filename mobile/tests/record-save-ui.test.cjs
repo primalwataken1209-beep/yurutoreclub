@@ -2,48 +2,17 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {JSDOM,ResourceLoader}=require('jsdom');
-const {build}=require('../scripts/build-mobile.cjs');
 const {fakeFilesystem,installNative,installCoreStub,CORE_STUB}=require('./fakes.cjs');
-const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
-const settle=(ms=150)=>new Promise(r=>setTimeout(r,ms));
-let www;
-function staging(){
-  if(www)return www;
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'yt-record-'));
-  process.on('exit',()=>fs.rmSync(dir,{recursive:true,force:true}));
-  www=path.join(dir,'www');build({root,mobile,out:www,target:'staging',env:{YT_STAGING_PUBLISHABLE_KEY:'sb_publishable_TESTONLY_not_a_real_key'}});
-  return www;
-}
-// The whole built app on a simulated Android shell (in-memory plugins, no network).
+const {launch,staging,settle}=require('./app-harness.cjs');
+// The whole built app on a simulated Android shell, started as a trial user.
 async function app(t,fsys){
-  const out=staging(),remote=[],errors=[],log={open:[],close:0,minimized:0,listeners:{}};
-  class Bundle extends ResourceLoader{fetch(url){
-    const u=new URL(url);if(u.origin!=='https://localhost'){remote.push(url);return null;}
-    if(u.pathname==='/vendor/capacitor.js')return Promise.resolve(Buffer.from(CORE_STUB));
-    const p=path.join(out,decodeURIComponent(u.pathname));
-    return Promise.resolve(fs.readFileSync(p.endsWith(path.sep)?path.join(p,'index.html'):p));
-  }}
-  const dom=new JSDOM(fs.readFileSync(path.join(out,'index.html')),{url:'https://localhost/',runScripts:'dangerously',resources:new Bundle(),pretendToBeVisual:true,
-    beforeParse(w){
-      Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.TextEncoder=TextEncoder;
-      w.localStorage.setItem('yurutore_language','ja');
-      w.fetch=()=>Promise.reject(new Error('offline'));
-      w.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
-      w.addEventListener('error',e=>errors.push(e.message));
-      installNative(w,{platform:'android',fsys,log});installCoreStub(w);
-    }});
-  t.after(()=>dom.window.close());
-  const w=dom.window;
-  for(let i=0;i<60&&!w.document.querySelector('#root button');i++)await settle(100);
-  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.replace(/\s+/g,'').includes(label.replace(/\s+/g,'')));
-  const click=async label=>{const b=button(label);assert.ok(b,'button '+label+': '+w.document.getElementById('root').textContent.slice(0,200));b.click();await settle();};
-  const fill=(sel,v)=>{const el=w.document.querySelector(sel);Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value').set.call(el,v);el.dispatchEvent(new w.Event('input',{bubbles:true}));};
-  await click('まずは体験してみる');await click('まずは体験してみる');
-  await click('🚶 ウォーキング');await click('週1〜2回');await click('次へ進む');
-  fill('input[placeholder="例：ゆるパンダ"]','保存テスト');await click('はじめる');
-  assert.ok(button('お部屋に遊びに行く'),'trial home reached');
-  const record=async()=>{w.document.querySelector('.fab').click();await settle();await click('ランニング');await click('報告する ✓');};
-  return {w,record,errors,remote};
+  const s=await launch(t,{fsys});
+  await s.click('まずは体験してみる');await s.click('まずは体験してみる');
+  await s.click('🚶 ウォーキング');await s.click('週1〜2回');await s.click('次へ進む');
+  s.fill('input[placeholder="例：ゆるパンダ"]','保存テスト');await s.click('はじめる');
+  assert.ok(s.button('お部屋に遊びに行く'),'trial home reached');
+  const record=async()=>{s.w.document.querySelector('.fab').click();await settle();await s.click('ランニング');await s.click('報告する ✓');};
+  return {...s,record};
 }
 const saved=fsys=>{const f=[...fsys.files.entries()].filter(([k])=>/yt-records-[ab]\.json$/.test(k)).map(([,v])=>JSON.parse(v)).sort((a,b)=>b.gen-a.gen)[0];
   const key=f&&Object.keys(f.keys).find(k=>k.startsWith('yurutore-v6-')&&k.endsWith('-guest'));return key?JSON.parse(f.keys[key]):null;};

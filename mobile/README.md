@@ -54,6 +54,8 @@ npm test              # この土台のテスト（ネットワーク不要）
 
 ## ID（すべて仮・未登録）
 
+正式 ID の候補（本番 `club.yurutore.app`、staging `club.yurutore.app.staging`）と戻り先 URL の仕様は `docs/mobile-ids-and-auth.md`。
+
 - appId / applicationId / Bundle ID: `club.yurutore.dev.placeholder`
 - 認証の戻り先: `club.yurutore.dev.placeholder://auth/callback`
 - 正式IDは、ストアのアカウントと ID 登録を本人が行ってから決める。変更する箇所は
@@ -66,7 +68,7 @@ npm test              # この土台のテスト（ネットワーク不要）
 |---|---|---|
 | staging の Redirect URL 登録 | 未 | Supabase staging の Auth に `club.yurutore.dev.placeholder://auth/callback` を追加（Work管理） |
 | Google ログインの実機確認 | 未 | 上の登録後、Android/iOS 実機で確認 |
-| Apple でサインイン | **未実装（無効）** | Apple Developer 登録、Services ID・鍵の作成、Supabase の Apple provider 設定が必要。ブリッジは provider 一覧で無効化しており、画面にボタンはない |
+| Apple でサインイン | **コードのみ実装・既定で無効・実機未確認** | PKCE ブラウザ方式とボタン（iOS のみ、`--enable-apple-signin` のビルドだけ）、13 歳確認、失敗時の文言を実装しテスト済み。Apple Developer 登録（課金）、Services ID・鍵の作成、Supabase の Apple provider 設定、退会時のトークン取り消しは未実施・承認待ち。詳細は `docs/mobile-ids-and-auth.md` |
 | メール確認・パスワード再設定のアプリ内復帰 | 未検証 | 戻り先はアプリのスキームになる。メールアプリからの復帰と PASSWORD_RECOVERY の動きを実機で確認する |
 | 署名 | 未 | upload key / 配布証明書の作成は本人。リポジトリに鍵を置かない |
 | アイコン・スプラッシュ | Capacitor 既定のまま | 素材の作成 |
