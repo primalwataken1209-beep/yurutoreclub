@@ -21,7 +21,7 @@ function staging(){
 const slot=(gen,keys)=>JSON.stringify({format:1,gen,savedAt:0,keys});
 function boot(t,{stored={},fsys=fakeFilesystem(),secure=fakeSecureStorage(),platform='android',native=true,config={},before}={}){
   const out=staging();
-  const dom=new JSDOM('<!doctype html><body><div id="root"></div></body>',{url:'https://localhost/',runScripts:'outside-only'});
+  const dom=new JSDOM('<!doctype html><head><meta name="yt-app" content="app.bundle.js"></head><body><div id="root"></div></body>',{url:'https://localhost/',runScripts:'outside-only'});
   t.after(()=>dom.window.close());
   const w=dom.window,log={open:[],close:0,minimized:0,listeners:{},fetch:[]};
   Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.TextEncoder=TextEncoder;
@@ -65,7 +65,8 @@ test('a damaged newest copy falls back to the other slot',async t=>{
   assert.deepEqual(s.local()[U1],'good');
   const bad=fakeFilesystem(new Map([[A,slot(9,{'sb-x':'secret'})]]));
   const s2=boot(t,{fsys:bad});await s2.S().ready;
-  assert.equal(s2.S().status().status,'empty','a copy with non-app keys is rejected');assert.equal(s2.local()['sb-x'],undefined);
+  // A copy with non-app keys is rejected; with no other copy that is a stop, not a new install.
+  assert.equal(s2.S().status().status,'restore-failed');assert.equal(s2.local()['sb-x'],undefined);
 });
 test('surviving localStorage wins: keys it no longer has are not brought back',async t=>{
   const fsys=fakeFilesystem(new Map([[A,slot(6,{[U1]:'a',[U2]:'deleted account'})]]));
@@ -126,6 +127,75 @@ test('backgrounding the app writes immediately',async t=>{
   assert.deepEqual(s.file(B).keys,{[U1]:'x'});
 });
 
+/* ── Work review 699fb18: read errors, deletion leftovers, cleanup ── */
+const TOMB='LIBRARY_NO_CLOUD/yt-records-removed.json';
+test('read errors other than "file does not exist" stop the restore and nothing is written',async t=>{
+  for(const failing of [['yt-records-a.json','yt-records-b.json'],['yt-records-a.json'],['yt-records-removed.json']]){
+    const fsys=fakeFilesystem(new Map([[A,slot(3,{[U1]:'kept'})],[B,slot(2,{[U1]:'older'})]]));
+    failing.forEach(p=>fsys.fail.readFor.add(p));
+    const s=boot(t,{fsys});await s.S().ready;
+    assert.equal(s.S().status().status,'restore-failed',failing.join(','));
+    assert.ok(s.w.document.getElementById('yt-native-restore-error'));
+    s.w.localStorage.setItem(U1,'new');await settle(400);
+    assert.ok(fsys.calls.every(c=>c[0]!=='write'&&c[0]!=='delete'),'saved copies untouched: '+failing);
+    assert.equal(JSON.parse(fsys.files.get(A)).keys[U1],'kept');
+  }
+});
+test('with localStorage intact a read error does not matter and saving continues',async t=>{
+  const fsys=fakeFilesystem();fsys.fail.read=true;
+  const s=boot(t,{fsys,stored:{'yt-native-mirror-gen':'4',[U1]:'a'}});await s.S().ready;
+  assert.equal(s.S().status().status,'intact');
+  s.w.localStorage.setItem(U1,'b');await settle(400);assert.deepEqual(s.file(B).keys,{[U1]:'b'});
+});
+test('after a save only the committed copy remains and the removal is recorded',async t=>{
+  const s=boot(t);await s.S().ready;
+  s.w.localStorage.setItem(U1,'x');s.w.localStorage.setItem(U2,'personal');await settle(400);
+  s.w.localStorage.removeItem(U2);await settle(80);
+  assert.deepEqual(s.file(A).keys,{[U1]:'x'});assert.equal(s.fsys.files.has(B),false,'previous copy deleted');
+  assert.equal(s.file(TOMB).keys[U2],2);
+});
+test('an older copy left behind cannot bring back data removed later',async t=>{
+  // Newest copy damaged, previous copy still holds a deleted account, localStorage wiped.
+  const fsys=fakeFilesystem(new Map([[A,slot(5,{[U1]:'keep',[U2]:'deleted account'})],[B,'{"format":1,"gen":6,"keys":{"yu'],
+    [TOMB,JSON.stringify({format:1,keys:{[U2]:6}})]]));
+  const s=boot(t,{fsys});await s.S().ready;
+  assert.equal(s.S().status().status,'restored');
+  assert.deepEqual(s.local(),{[U1]:'keep','yt-native-mirror-gen':'5'});
+  // The tombstone survives the next save, so the removal is still known.
+  s.w.localStorage.setItem(U1,'keep2');await settle(400);
+  assert.equal(s.file(TOMB).keys[U2],6);
+});
+test('a key added again after removal is restored from a newer copy',async t=>{
+  const fsys=fakeFilesystem(new Map([[A,slot(8,{[U2]:'signed in again'})],[TOMB,JSON.stringify({format:1,keys:{[U2]:6}})]]));
+  const s=boot(t,{fsys});await s.S().ready;
+  assert.equal(s.local()[U2],'signed in again');
+});
+test('a damaged tombstone stops the restore',async t=>{
+  const fsys=fakeFilesystem(new Map([[A,slot(5,{[U1]:'a'})],[TOMB,'{"format":1,"keys":{"yur']]));
+  const s=boot(t,{fsys});await s.S().ready;
+  assert.equal(s.S().status().status,'restore-failed');assert.equal(s.local()[U1],undefined);
+});
+test('if deleting the previous copy fails the save still counts, the tombstone protects, and cleanup is retried',async t=>{
+  const s=boot(t);await s.S().ready;
+  s.w.localStorage.setItem(U2,'personal');await settle(400);
+  s.fsys.fail.remove=true;
+  const saved=s.S().whenSaved('yurutore-v6-');s.w.localStorage.removeItem(U2);
+  assert.equal(await saved,true);
+  assert.equal(s.S().status().status,'cleanup-failed');assert.equal(s.w.document.getElementById('yt-native-save-error'),null);
+  assert.ok(s.fsys.files.has(B)&&JSON.parse(s.fsys.files.get(B)).keys[U2],'old copy still there');
+  assert.equal(s.file(TOMB).keys[U2],2);
+  s.fsys.fail.remove=false;s.w.localStorage.setItem(U1,'next');await settle(400);
+  assert.equal(s.S().status().status,'saved');
+});
+test('whenSaved: true after a committed save, false after a failed one or a timeout',async t=>{
+  const s=boot(t,{config:{saveWaitMs:300}});await s.S().ready;
+  let p=s.S().whenSaved('yurutore-v6-');s.w.localStorage.setItem(U1,'a');assert.equal(await p,true);
+  s.fsys.fail.write=true;p=s.S().whenSaved('yurutore-v6-');s.w.localStorage.setItem(U1,'b');assert.equal(await p,false);
+  s.fsys.fail.write=false;
+  p=s.S().whenSaved('yurutore-v6-');s.w.localStorage.setItem('yurutore_language','ja');assert.equal(await p,false,'other keys do not count');
+  assert.ok(s.w.document.getElementById('yt-native-save-error'));
+});
+
 /* ── Session ── */
 const jwt=sub=>{const b=o=>Buffer.from(JSON.stringify(o)).toString('base64url');return b({alg:'HS256',typ:'JWT'})+'.'+b({sub,exp:Math.floor(Date.now()/1000)+3600,aud:'authenticated',role:'authenticated'})+'.sig';};
 function withSdk(s,responses){
@@ -180,6 +250,16 @@ test('if erasing on sign-out fails the user is told',async t=>{
   await s.S().sessionStorage.getItem('warm-up');secure.fail.clear=true;
   await c.auth.signOut();await settle(100);
   assert.match(s.w.document.getElementById('yt-native-auth-error').textContent,/消去できませんでした/);
+});
+test('only a missing install marker clears the Keychain; other stat errors stop without clearing',async t=>{
+  const secure=fakeSecureStorage(new Map([['yt-session_sb-knftduojdalnawvkbelt-auth-token','session']]));
+  const fsys=fakeFilesystem();fsys.fail.stat=true;
+  const s=boot(t,{secure,fsys,platform:'ios'});
+  await assert.rejects(()=>s.S().sessionStorage.getItem('sb-knftduojdalnawvkbelt-auth-token'),e=>e.code==='OS-PLUG-FILE-0013');
+  assert.ok(!secure.calls.some(c=>c[0]==='clear'),'not cleared on an unknown error');
+  assert.equal(secure.items.size,1);
+  fsys.fail.stat=false;fsys.files.set('LIBRARY_NO_CLOUD/yt-install.json','{"format":1}');
+  assert.equal(await s.S().sessionStorage.getItem('sb-knftduojdalnawvkbelt-auth-token'),'session');
 });
 test('a failed secure-storage setup is retried on the next call',async t=>{
   const secure=fakeSecureStorage();secure.fail.clear=true;

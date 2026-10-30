@@ -21,7 +21,9 @@ test('staging is the default target and bundles everything locally',t=>{
   const bundle=fs.readFileSync(path.join(out,'app.bundle.js'),'utf8');
   assert.ok(bundle.includes("'https://"+STAGING+".supabase.co'")&&bundle.includes(KEY));
   assert.ok(bundle.includes('window.YT_NATIVE.clientOptions(SUPABASE_URL)'));
-  assert.ok(bundle.includes("window.YT_NATIVE.oauthSignIn('google')"));
+  assert.ok(bundle.includes("window.YT_NATIVE.oauthSignIn(provider === 'apple' ? 'apple' : 'google')"),'one OAuth handler');
+  assert.ok(bundle.includes("window.YT_NATIVE_STORAGE.whenSaved('yurutore-v6-')"),'record screen waits for the device save');
+  assert.equal((bundle.match(/window\.YT_NATIVE\.appleEnabled &&/g)||[]).length,2,'Apple button on both sign-in screens, behind the flag');
   for(const rel of files(out).filter(f=>/\.(html|js|css|json)$/.test(f)))
     assert.ok(!fs.readFileSync(path.join(out,rel),'utf8').includes(PRODUCTION),'production reference in '+rel);
   const cfg=fs.readFileSync(path.join(out,'native-config.js'),'utf8');

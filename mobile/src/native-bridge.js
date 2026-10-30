@@ -143,6 +143,18 @@
   }
   if(App&&isNative)App.addListener('backButton',function(e){back(!!(e&&e.canGoBack));});
 
+  /* Sign in with Apple uses the same PKCE browser flow; it needs the Apple Services ID and key set up in
+     Supabase first, so builds keep it off unless built with --enable-apple-signin, and only iOS shows it. */
+  var platform=cap&&cap.getPlatform?cap.getPlatform():'web';
+  var appleEnabled=isNative&&platform==='ios'&&(cfg.oauthProviders||[]).indexOf('apple')>=0;
+  var TEXT={apple:['Appleでサインイン','Sign in with Apple'],
+    appleFailed:['Appleでのサインインを開始できませんでした。時間をおいてもう一度お試しください。',"Couldn't start Sign in with Apple. Please try again later."]};
+  function text(key){
+    var en=false;try{en=(localStorage.getItem('yurutore_language')||document.documentElement.lang)==='en';}catch(e){}
+    var pair=TEXT[key];return pair?pair[en?1:0]:'';
+  }
+
   window.YT_NATIVE=Object.freeze({target:cfg.target,redirectUrl:cfg.redirectUrl,clientOptions:clientOptions,
-    attach:attach,oauthSignIn:oauthSignIn,handleUrl:handleUrl,classify:classify,back:back});
+    attach:attach,oauthSignIn:oauthSignIn,handleUrl:handleUrl,classify:classify,back:back,
+    appleEnabled:appleEnabled,text:text});
 })();

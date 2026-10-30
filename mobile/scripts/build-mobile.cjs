@@ -30,10 +30,10 @@ const CDN_TAGS=[
 const LEGAL_PAGES=['privacy','terms','community-guidelines','contact','account-deletion'];
 
 const compile=code=>babel.transformSync(code,{babelrc:false,configFile:false,presets:['@babel/preset-react'],comments:false}).code;
-function once(text,from,to,label){
+function once(text,from,to,label,count=1){
   const n=text.split(from).length-1;
-  if(n!==1)throw Error('Source anchor changed ('+label+'): found '+n);
-  return text.replace(from,()=>to);
+  if(n!==count)throw Error('Source anchor changed ('+label+'): found '+n);
+  return text.split(from).join(to);
 }
 function exportLists(root){
   const src=fs.readFileSync(path.join(root,'scripts/build-public.cjs'),'utf8');
@@ -50,10 +50,10 @@ function options(argv,env){
   const arg=k=>{const a=argv.find(x=>x.startsWith('--'+k+'='));return a?a.slice(k.length+3):undefined;};
   const target=arg('target')||'staging';
   if(!TARGETS[target])throw Error('Unknown target: '+target);
-  return {target,approval:arg('release-approval'),env};
+  return {target,approval:arg('release-approval'),apple:argv.includes('--enable-apple-signin'),env};
 }
 
-function build({root,mobile,out,target,approval,env,config}){
+function build({root,mobile,out,target,approval,apple=false,env,config}){
   const t=TARGETS[target],other=Object.values(TARGETS).find(x=>x!==t);
   config=config||JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8'));
   const scheme=String(config.appId||'');
@@ -89,7 +89,21 @@ function build({root,mobile,out,target,approval,env,config}){
     'window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, window.YT_NATIVE.clientOptions(SUPABASE_URL)) : null;\nif(supabaseClient)window.YT_NATIVE.attach(supabaseClient);','client');
   source=once(source,'function authRedirectTo(){\n','function authRedirectTo(){\n  return window.YT_NATIVE.redirectUrl;\n','redirect');
   source=once(source,"const {error}=await supabaseClient.auth.signInWithOAuth({\n        provider:'google',\n        options:{redirectTo:authRedirectTo()}\n      });",
-    "const {error}=await window.YT_NATIVE.oauthSignIn('google');",'google');
+    "const {error}=await window.YT_NATIVE.oauthSignIn(provider==='apple'?'apple':'google');",'google');
+  // One handler for both providers; Apple stays hidden unless the build enables it (see docs/mobile-ids-and-auth.md).
+  source=once(source,'const handleGoogleLogin=async()=>{','const handleGoogleLogin=async(provider)=>{','provider');
+  source=once(source,"      setAuthError(t('msg.googleConfig'));",
+    "      setAuthError(provider==='apple'?window.YT_NATIVE.text('appleFailed'):t('msg.googleConfig'));",'provider error');
+  source=once(source,"            onGoogleLogin();\n          }}>{t('auth.google')}</button>",
+    "            onGoogleLogin();\n          }}>{t('auth.google')}</button>\n"+
+    "          {window.YT_NATIVE.appleEnabled&&<button type=\"button\" className=\"yt-apple-signin\" disabled={authLoading} onClick={()=>{\n"+
+    "            if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}\n"+
+    "            onGoogleLogin('apple');\n"+
+    "          }}>{window.YT_NATIVE.text('apple')}</button>}",'apple button',2);
+  // The record screen waits until the new record is committed to the device file; a failure is not praised.
+  source=once(source,"    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n",
+    "    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n"+
+    "    if(!(await window.YT_NATIVE_STORAGE.whenSaved('yurutore-v6-'))){setShowRep(false);setPostAfter(false);return;}\n",'record save');
   const bundle=compile(source);
 
   const csp=["default-src 'self'","script-src 'self'","style-src 'self' 'unsafe-inline'",
@@ -102,7 +116,9 @@ function build({root,mobile,out,target,approval,env,config}){
   page=once(page,CDN_TAGS.join('\n'),[...native,'vendor/react.production.min.js','vendor/react-dom.production.min.js','vendor/supabase.js']
     .map(s=>'<script src="'+s+'"></script>').join('\n'),'cdn');
   page=once(page,'<meta name="viewport" content="width=device-width,initial-scale=1.0"/>',
-    '<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>\n<meta http-equiv="Content-Security-Policy" content="'+csp+'"/>','viewport');
+    '<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>\n<meta http-equiv="Content-Security-Policy" content="'+csp+'"/>\n<meta name="yt-app" content="app.bundle.js"/>','viewport');
+  // Sign in with Apple button (shown only when the build enables Apple and runs on iOS): black, full width, system font.
+  page=once(page,'</head>','<style>.yt-apple-signin{display:block;width:100%;margin:8px 0;padding:12px;border:none;border-radius:14px;background:#000;color:#fff;font:600 15px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}.yt-apple-signin:disabled{opacity:.5}</style>\n</head>','apple style');
 
   const {tops,dirs}=exportLists(root);
   fs.mkdirSync(out);
@@ -122,7 +138,7 @@ function build({root,mobile,out,target,approval,env,config}){
   for(const name of ['native-bridge.js','native-storage.js'])fs.copyFileSync(path.join(mobile,'src',name),path.join(out,name));
   const legal=fs.readFileSync(path.join(root,'legal','legal.js'),'utf8').match(/SUPPORT_EMAIL:\s*'([^']+)'/);
   const nativeConfig={target,supabaseUrl,redirectUrl:scheme+'://auth/callback',
-    oauthProviders:['google'],allowedMail:legal?[legal[1]]:[],allowedExternalOrigins:[]};
+    oauthProviders:apple?['google','apple']:['google'],allowedMail:legal?[legal[1]]:[],allowedExternalOrigins:[]};
   fs.writeFileSync(path.join(out,'native-config.js'),'window.YT_NATIVE_CONFIG=Object.freeze('+JSON.stringify(nativeConfig)+');\n');
   fs.writeFileSync(path.join(out,'app.bundle.js'),bundle);
   fs.writeFileSync(path.join(out,'index.html'),page);
