@@ -18,7 +18,8 @@ const VENDOR=[
   ['supabase.js','@supabase/supabase-js/dist/umd/supabase.js'],
   ['capacitor.js','@capacitor/core/dist/capacitor.js'],
   ['capacitor-app.js','@capacitor/app/dist/plugin.js'],
-  ['capacitor-browser.js','@capacitor/browser/dist/plugin.js']
+  ['capacitor-browser.js','@capacitor/browser/dist/plugin.js'],
+  ['capacitor-secure-storage.js','@aparajita/capacitor-secure-storage/dist/plugin.js']
 ];
 const CDN_TAGS=[
   '<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>',
@@ -94,8 +95,10 @@ function build({root,mobile,out,target,approval,env,config}){
   const csp=["default-src 'self'","script-src 'self'","style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: "+supabaseUrl+' https://*.googleusercontent.com',"connect-src "+supabaseUrl,
     "font-src 'self'","object-src 'none'","base-uri 'self'","frame-src 'none'","form-action 'none'"].join('; ');
-  const native=['vendor/capacitor.js','vendor/capacitor-app.js','vendor/capacitor-browser.js','native-config.js','native-bridge.js'];
-  let page=html.replace(blocks[0][0],()=>'<script src="app.bundle.js"></script>');
+  const native=['vendor/capacitor.js','vendor/capacitor-app.js','vendor/capacitor-browser.js','vendor/capacitor-secure-storage.js',
+    'native-config.js','native-bridge.js','native-storage.js'];
+  // native-storage.js starts app.bundle.js once stored records are restored.
+  let page=html.replace(blocks[0][0],()=>'');
   page=once(page,CDN_TAGS.join('\n'),[...native,'vendor/react.production.min.js','vendor/react-dom.production.min.js','vendor/supabase.js']
     .map(s=>'<script src="'+s+'"></script>').join('\n'),'cdn');
   page=once(page,'<meta name="viewport" content="width=device-width,initial-scale=1.0"/>',
@@ -116,7 +119,7 @@ function build({root,mobile,out,target,approval,env,config}){
   }
   fs.mkdirSync(path.join(out,'vendor'));
   for(const [name,rel] of VENDOR)fs.copyFileSync(path.join(mobile,'node_modules',rel),path.join(out,'vendor',name));
-  fs.copyFileSync(path.join(mobile,'src','native-bridge.js'),path.join(out,'native-bridge.js'));
+  for(const name of ['native-bridge.js','native-storage.js'])fs.copyFileSync(path.join(mobile,'src',name),path.join(out,name));
   const legal=fs.readFileSync(path.join(root,'legal','legal.js'),'utf8').match(/SUPPORT_EMAIL:\s*'([^']+)'/);
   const nativeConfig={target,supabaseUrl,redirectUrl:scheme+'://auth/callback',
     oauthProviders:['google'],allowedMail:legal?[legal[1]]:[],allowedExternalOrigins:[]};

@@ -1,7 +1,8 @@
 # Compile-only checks for the Capacitor shell in mobile/.
-# Standard GitHub-hosted runners only; no secrets, no signing, no upload, no deploy.
+# Standard GitHub-hosted runners only; no secrets, no release signing, no upload, no deploy.
+# Android assembleDebug signs with the toolchain's throwaway debug key; iOS is built with signing disabled.
 # The bundle is a staging build with a compile-only placeholder key, so the result cannot reach any project.
-name: Mobile compile (unsigned, staging bundle)
+name: Mobile compile (no release signing, staging bundle)
 
 on:
   pull_request:
@@ -66,7 +67,7 @@ jobs:
           grep -q '^distributionSha256Sum=' android/gradle/wrapper/gradle-wrapper.properties
       - run: node scripts/build-mobile.cjs --target=staging
       - run: npx cap sync android
-      - name: Assemble unsigned debug APK (compile check only)
+      - name: Assemble debug build without release signing (compile check only)
         working-directory: mobile/android
         run: ./gradlew --no-daemon assembleDebug
       - name: Confirm no release signing or production reference in the build

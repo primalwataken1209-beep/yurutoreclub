@@ -28,18 +28,29 @@
 
   function clientOptions(url){
     if(url!==cfg.supabaseUrl)throw new Error('Supabase URL does not match the build target');
-    return {auth:{flowType:'pkce',detectSessionInUrl:false,persistSession:true,autoRefreshToken:true},
-            global:{fetch:guardedFetch}};
+    var auth={flowType:'pkce',detectSessionInUrl:false,persistSession:true,autoRefreshToken:true};
+    // In the native shell the session lives in the Keychain / Keystore (native-storage.js), not in localStorage.
+    var secure=window.YT_NATIVE_STORAGE&&window.YT_NATIVE_STORAGE.sessionStorage;
+    if(secure)auth.storage=secure;
+    else if(isNative)throw new Error('Secure session storage is unavailable');
+    return {auth:auth,global:{fetch:guardedFetch}};
   }
 
   /* The web app only shows errors from the call that opened the browser, so failures on return are shown here. */
   function authFailed(){
+    notice('ログインを完了できませんでした。もう一度お試しください。','Sign-in did not complete. Please try again.');
+  }
+  function signOutClearFailed(){
+    notice('ログイン情報を端末から消去できませんでした。アプリを再起動してから、もう一度ログアウトしてください。',
+      "We couldn't remove your sign-in from this device. Please restart the app and sign out again.");
+  }
+  function notice(jaText,enText){
     var ja=true;
     try{ja=(localStorage.getItem('yurutore_language')||document.documentElement.lang||'ja')!=='en';}catch(e){}
     var old=document.getElementById('yt-native-auth-error');if(old)old.remove();
     var el=document.createElement('div');
     el.id='yt-native-auth-error';el.setAttribute('role','alert');
-    el.textContent=ja?'ログインを完了できませんでした。もう一度お試しください。':'Sign-in did not complete. Please try again.';
+    el.textContent=ja?jaText:enText;
     el.style.cssText='position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:2147483647;'+
       'background:#fff5f0;color:#a4532f;border:1.5px solid #f0c9b6;border-radius:14px;padding:12px 14px;font-size:13px;font-weight:700;';
     el.addEventListener('click',function(){el.remove();});
@@ -80,6 +91,11 @@
       launchChecked=true;
       App.addListener('appUrlOpen',function(e){handleUrl(e&&e.url);});
       App.getLaunchUrl().then(function(r){if(r&&r.url)handleUrl(r.url);}).catch(function(){});
+      // Sign-out (including after account deletion) removes every stored session item, not only the SDK's own key.
+      c.auth.onAuthStateChange(function(event){
+        if(event!=='SIGNED_OUT'||!window.YT_NATIVE_STORAGE)return;
+        window.YT_NATIVE_STORAGE.clearSession().catch(signOutClearFailed);
+      });
       // Timers do not run while the app is in the background: refresh the session only while active.
       App.addListener('appStateChange',function(s){
         if(s&&s.isActive)c.auth.startAutoRefresh();else c.auth.stopAutoRefresh();

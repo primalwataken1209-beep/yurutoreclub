@@ -10,10 +10,12 @@
     "test": "node --test --test-concurrency=1 tests/*.test.cjs"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "8.0.1",
     "@capacitor/android": "8.5.3",
     "@capacitor/app": "8.1.2",
     "@capacitor/browser": "8.0.5",
     "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.5",
     "@capacitor/ios": "8.5.3",
     "@supabase/supabase-js": "2.118.0",
     "react": "18.3.1",

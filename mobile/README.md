@@ -72,8 +72,8 @@ npm test              # この土台のテスト（ネットワーク不要）
 | アイコン・スプラッシュ | Capacitor 既定のまま | 素材の作成 |
 | Android の画面端（edge-to-edge） | 未検証 | targetSdk 36 では画面端まで描画される。既存CSSの `env(safe-area-inset-*)` が Android WebView で効くかを実機で確認する |
 | ログイン中のネット不通 | 未検証 | 体験版がオフラインで動くことは試験済み。ログイン中の表示は実機で確認する |
-| **運動記録の永続保存** | **提出ブロッカー（未対応）** | 記録は Web版と同じ WebView の localStorage にあり、Capacitor 公式 docs（Preferences）は OS が localStorage を消す場合があると明記している。端末内の永続保存と起動時の復元（写真を含むサイズを考慮）を設計する。Preferences は小さな設定用なので、記録や画像の保存先にはしない |
-| **ログインセッションの保存先** | **提出ブロッカー（未対応）** | SDK の既定どおり localStorage。Keychain / Keystore に保存するには公式でないプラグインの選定が必要（未承認）。強制終了・再開・トークン更新・ログアウトの実機確認と合わせて決める |
+| 運動記録の永続保存 | **実装済み・実機未確認（提出前に実機確認が必須）** | `src/native-storage.js`。アプリのキー（`yurutore-…` / `yurutore_…`）を、バックアップ対象外のアプリ専用ファイル（iOS `Library/NoCloud`、Android は files 領域で data_extraction_rules により除外）へ2つのファイルを交互に書いて保存する。localStorage が消えたときだけ起動前に復元し、アプリはその後に起動する。保存や復元の失敗は画面に表示し、成功扱いにしない。復元に失敗したら保存済みの写しを上書きしない。写真入りの記録も同じ写しに入る（上限は localStorage と同じ）。公式 `@capacitor/filesystem` 8.1.5 を使用。Preferences は使わない |
+| ログインセッションの保存先 | **実装済み・実機未確認（提出前に実機確認が必須）** | `@aparajita/capacitor-secure-storage` 8.0.1（MIT）。iOS は Keychain（この端末のみ・iCloud 同期なし・初回ロック解除後）、Android は Keystore の AES-GCM で暗号化。localStorage にはセッションを置かず、安全な保存に失敗したらログイン失敗として表示する。ログアウト（退会後を含む）で `yt-session_` の項目をすべて消す。iOS の Keychain はアプリを削除しても残るため、新規インストール後の初回起動で消す。強制終了・再開・トークン更新・ログアウトは実機で未確認 |
 | OS バックアップ | 対応済み | `allowBackup="false"` と data_extraction_rules で、クラウドバックアップと端末間転送から WebView の保存領域を除外（機種変更で記録は引き継がれない） |
 | セッション更新の再開 | 対応済み（実機未確認） | アプリが前面のときだけ自動更新し、背面で停止（appStateChange） |
 | Google ログイン失敗の表示 | 対応済み（実機未確認） | 戻ってきた時点の失敗（拒否・交換失敗）は画面上部に日英で表示する |
@@ -83,6 +83,19 @@ npm test              # この土台のテスト（ネットワーク不要）
 ## Compile CI（`.github/workflows/mobile-compile.yml`）
 
 - 対象は PR 上の `mobile/**`・`index.html`・`app.js` の変更と、手動実行。権限は `contents: read` だけで、action は SHA で固定、各ジョブにタイムアウトを設定している。
-- 標準 runner だけを使う（`ubuntu-latest`、`macos-26`）。secret・署名・成果物のアップロード・デプロイはない。
-- 鍵はコンパイル確認用のダミーで、staging バンドルとしてビルドする。Android は署名なしの debug APK、iOS は `CODE_SIGNING_ALLOWED=NO` のシミュレータ向けビルド。
+- 標準 runner だけを使う（`ubuntu-latest`、`macos-26`）。secret・リリース署名・成果物のアップロード・デプロイはない。
+- 鍵はコンパイル確認用のダミーで、staging バンドルとしてビルドする。Android はリリース署名なしのデバッグビルド（`assembleDebug` はツールが自動生成する使い捨てのデバッグ鍵で署名する。配布用ではない）、iOS は `CODE_SIGNING_ALLOWED=NO` のシミュレータ向けビルド。
 - Gradle wrapper の jar と配布ファイルは、公式のチェックサムで確認する。
+
+## 端末保存の方式の選定（2026-10-31）
+
+| 候補 | 評価 | 結論 |
+|---|---|---|
+| `@capacitor/filesystem` 8.1.5 | Ionic公式、MIT、Capacitor 8 用、2026-10-15 公開。`LIBRARY_NO_CLOUD`（iOS の Library/NoCloud）に対応。同梱依存の既知脆弱性 0 件 | 記録の保存に採用。JS 側は公式の `registerPlugin('Filesystem')` だけを使い、追加の JS（synapse）は同梱しない |
+| `@capacitor/preferences` | 公式だが小さな設定用（公式 docs） | 記録や画像の保存先にしない |
+| `@aparajita/capacitor-secure-storage` 8.0.1 | MIT、Capacitor 8 対応、2026-09-23 公開、継続して更新されている。iOS は KeychainSwift（MIT、SPM で `from: 21.0.0`）、Android は Keystore AES-GCM と SharedPreferences。アクセス設定（この端末のみ）と iCloud 同期の切り替えがある。同梱依存の既知脆弱性 0 件 | セッションの保存に採用。依存に含まれる `@capacitor/keyboard` は直接の依存ではないため、ネイティブには登録されない（`cap sync` で確認） |
+| `capacitor-secure-storage-plugin` 0.13.0 | MIT、Capacitor 8 対応だが更新間隔が長く、0.x 系 | 見送り |
+| `@capgo/capacitor-native-biometric` | MPL-2.0、生体認証が主目的 | 目的外のため見送り |
+| 独自の小さなネイティブブリッジ | 依存は減るが、暗号処理を新しく書くことになり、この環境では実機で動かして確かめられない | 今回は見送り。上の採用ライブラリに問題が見つかった場合の代替案 |
+
+Android のデバッグビルドは、ツールが自動生成するデバッグ鍵で署名される。配布できる署名（リリース署名）は作っていない。

@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {JSDOM,ResourceLoader}=require('jsdom');
 const {build}=require('../scripts/build-mobile.cjs');
+const {installNative,fire}=require('./fakes.cjs');
 const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
 const KEY='sb_publishable_TESTONLY_not_a_real_key';
 const SUPA='https://knftduojdalnawvkbelt.supabase.co',CALLBACK='club.yurutore.dev.placeholder://auth/callback';
@@ -17,19 +18,16 @@ function staging(t){
 const settle=(ms=150)=>new Promise(r=>setTimeout(r,ms));
 
 // Bare page with stand-ins for the native plugins, plus the real vendored SDK and bridge.
-function shell(t,{native=true}={}){
+function shell(t,{native=true,platform,page='<!doctype html><body></body>',secure,fsys}={}){
   const out=staging(t);
-  const dom=new JSDOM('<!doctype html><body></body>',{url:'https://localhost/',runScripts:'outside-only'});t.after(()=>dom.window.close());
+  const dom=new JSDOM(page,{url:'https://localhost/',runScripts:'outside-only'});t.after(()=>dom.window.close());
   const w=dom.window,log={open:[],close:0,fetch:[],minimized:0,listeners:{},nav:[]};
   // WebViews provide WebCrypto and TextEncoder; jsdom does not.
   Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.TextEncoder=TextEncoder;
   w.fetch=async(url,init)=>{log.fetch.push({url:String(url),body:init&&init.body});return new Response('{"error":"invalid_grant"}',{status:400,headers:{'content-type':'application/json'}});};
-  w.Capacitor={isNativePlatform:()=>native};
-  w.capacitorApp={App:{addListener:(name,fn)=>{log.listeners[name]=fn;return Promise.resolve({remove(){}});},
-    getLaunchUrl:()=>Promise.resolve(null),minimizeApp:()=>{log.minimized++;}}};
-  w.capacitorBrowser={Browser:{open:async o=>{log.open.push(o.url);},close:async()=>{log.close++;}}};
-  for(const f of ['native-config.js','native-bridge.js','vendor/supabase.js'])w.eval(fs.readFileSync(path.join(out,f),'utf8'));
-  return {w,log};
+  const fakes=installNative(w,{native,platform,secure,fsys,log});
+  for(const f of ['native-config.js','native-bridge.js','native-storage.js','vendor/supabase.js'])w.eval(fs.readFileSync(path.join(out,f),'utf8'));
+  return {w,log,...fakes};
 }
 function client(w){return w.supabase.createClient(SUPA,KEY,w.YT_NATIVE.clientOptions(SUPA));}
 
@@ -55,7 +53,7 @@ test('only the exact callback exchanges a code, through the build target only',a
   assert.match(w.document.getElementById('yt-native-auth-error').textContent,/ログインを完了できませんでした/);
   w.document.getElementById('yt-native-auth-error').remove();
   assert.ok(log.listeners.appUrlOpen,'listens for app links');
-  log.listeners.appUrlOpen({url:CALLBACK+'?code=abc123'});await settle();
+  fire(log,'appUrlOpen',{url:CALLBACK+'?code=abc123'});await settle();
   assert.equal(log.fetch.length,1);
   assert.ok(log.fetch[0].url.startsWith(SUPA+'/auth/v1/token?grant_type=pkce'));
   assert.match(String(log.fetch[0].body),/"auth_code":"abc123"/);assert.match(String(log.fetch[0].body),/"code_verifier":"[^"]+"/);
@@ -65,14 +63,14 @@ test('only the exact callback exchanges a code, through the build target only',a
 });
 test('session refresh pauses in the background and resumes when the app returns',async t=>{
   const {w,log}=shell(t);const calls=[];
-  w.YT_NATIVE.attach({auth:{startAutoRefresh:()=>calls.push('start'),stopAutoRefresh:()=>calls.push('stop')}});
+  w.YT_NATIVE.attach({auth:{onAuthStateChange(){},startAutoRefresh:()=>calls.push('start'),stopAutoRefresh:()=>calls.push('stop')}});
   assert.ok(log.listeners.appStateChange);
-  log.listeners.appStateChange({isActive:false});log.listeners.appStateChange({isActive:true});
+  fire(log,'appStateChange',{isActive:false});fire(log,'appStateChange',{isActive:true});
   assert.deepEqual(calls,['stop','start']);
 });
 test('English sign-in failure message',async t=>{
   const {w}=shell(t);w.localStorage.setItem('yurutore_language','en');
-  w.YT_NATIVE.attach({auth:{startAutoRefresh(){},stopAutoRefresh(){},exchangeCodeForSession:async()=>({error:new Error('x')})}});
+  w.YT_NATIVE.attach({auth:{onAuthStateChange(){},startAutoRefresh(){},stopAutoRefresh(){},exchangeCodeForSession:async()=>({error:new Error('x')})}});
   await w.YT_NATIVE.handleUrl(CALLBACK+'?code=zzz');
   assert.match(w.document.getElementById('yt-native-auth-error').textContent,/Sign-in did not complete/);
 });
@@ -83,7 +81,7 @@ test('Apple and other providers stay disabled until configured',async t=>{
 });
 test('a tampered authorize URL is not opened',async t=>{
   const {w,log}=shell(t);
-  const fake=extra=>({auth:{signInWithOAuth:async()=>({data:{url:extra},error:null})}});
+  const fake=extra=>({auth:{onAuthStateChange(){},signInWithOAuth:async()=>({data:{url:extra},error:null})}});
   for(const url of ['https://evil.example/auth/v1/authorize?redirect_to='+encodeURIComponent(CALLBACK)+'&code_challenge=x',
                     SUPA+'/auth/v1/authorize?redirect_to=https%3A%2F%2Fevil.example&code_challenge=x',
                     SUPA+'/auth/v1/authorize?redirect_to='+encodeURIComponent(CALLBACK)]){
@@ -113,7 +111,7 @@ test('Android back closes the top sheet first, then screens, then leaves the app
   const add=(cls,label)=>{const el=w.document.createElement('div');el.className=cls;el.addEventListener('click',()=>{log.nav.push(label);el.remove();});w.document.body.appendChild(el);};
   add('room-full-back','screen');add('overlay','sheet');
   assert.ok(log.listeners.backButton,'back listener registered');
-  log.listeners.backButton({canGoBack:false});log.listeners.backButton({canGoBack:false});log.listeners.backButton({canGoBack:false});
+  fire(log,'backButton',{canGoBack:false});fire(log,'backButton',{canGoBack:false});fire(log,'backButton',{canGoBack:false});
   assert.deepEqual(log.nav,['sheet','screen']);assert.equal(log.minimized,1);
 });
 test('outside the native shell no listeners are registered',async t=>{
@@ -152,7 +150,7 @@ test('the bundled app starts and the trial works with the network switched off',
 });
 test('without WebCrypto the plain PKCE fallback is refused',async t=>{
   const {w,log}=shell(t);
-  w.YT_NATIVE.attach({auth:{signInWithOAuth:async()=>({data:{url:SUPA+'/auth/v1/authorize?provider=google&redirect_to='+
+  w.YT_NATIVE.attach({auth:{onAuthStateChange(){},signInWithOAuth:async()=>({data:{url:SUPA+'/auth/v1/authorize?provider=google&redirect_to='+
     encodeURIComponent(CALLBACK)+'&code_challenge=abc&code_challenge_method=plain'},error:null})}});
   const r=await w.YT_NATIVE.oauthSignIn('google');
   assert.match(String(r.error&&r.error.message),/Unexpected authorize URL/);assert.equal(log.open.length,0);

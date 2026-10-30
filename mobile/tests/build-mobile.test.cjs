@@ -38,7 +38,7 @@ test('static files and vendored libraries are byte-identical to their sources',t
     assert.deepEqual(fs.readFileSync(path.join(out,'vendor',name)),fs.readFileSync(path.join(mobile,'node_modules',rel)),name);
   assert.equal(fs.readFileSync(path.join(out,'native-bridge.js'),'utf8'),fs.readFileSync(path.join(mobile,'src','native-bridge.js'),'utf8'));
   const privacy=fs.readFileSync(path.join(out,'privacy','index.html'),'utf8');
-  assert.match(privacy,/<script src="\.\.\/native-bridge\.js"><\/script>\n<script src="\.\.\/legal\/legal\.js"><\/script>/);
+  assert.match(privacy,/<script src="\.\.\/native-bridge\.js"><\/script>\n<script src="\.\.\/native-storage\.js"><\/script>\n<script src="\.\.\/legal\/legal\.js"><\/script>/);
 });
 test('the staging key must be a publishable key and nothing is written otherwise',t=>{
   for(const key of [undefined,'','sb_secret_abcdefghijklmnop','eyJhbGciOiJIUzI1NiJ9.e30.x','sb_publishable_short']){
