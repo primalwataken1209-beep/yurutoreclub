@@ -49,11 +49,42 @@ test('the praise screen appears only after the record is committed to the device
   const st=saved(fsys);assert.equal(st.reports.length,1);assert.equal(st.reports[0].aid,'run');
   assert.deepEqual(s.errors,[]);assert.deepEqual(s.remote,[]);
 });
+const appState=s=>{const k=Object.keys(s.w.localStorage).find(k=>k.startsWith('yurutore-v6-')&&k.endsWith('-guest'));return JSON.parse(s.w.localStorage.getItem(k));};
+const praised=async s=>{for(let i=0;i<30&&!s.w.document.querySelector('.pj-stage');i++)await settle(100);return !!s.w.document.querySelector('.pj-stage');};
+test('Work 0e4d5f8 scenario: submitting the same record again after a failed save keeps one record and praises once',async t=>{
+  const fsys=fakeFilesystem();const s=await app(t,fsys);
+  fsys.fail.write=true;await s.record();await settle(1500);
+  assert.equal(!!s.w.document.querySelector('.pj-stage'),false);assert.equal(appState(s).reports.length,1);
+  fsys.fail.write=false;await s.record();   // the same activity, entered again by the user
+  assert.ok(await praised(s),'praised once the retry is committed');
+  assert.equal(appState(s).reports.length,1,'no second record in the app');
+  assert.equal(saved(fsys).reports.length,1,'exactly one record committed');assert.equal(saved(fsys).reports[0].aid,'run');
+  s.w.document.querySelector('.pj-stage').click();await settle();await s.click('ホームへ戻る');await settle(800);
+  assert.equal(!!s.w.document.querySelector('.pj-stage'),false,'praise shown once, not queued twice');
+});
+test('resubmitting while the device is still failing does not add records either',async t=>{
+  const fsys=fakeFilesystem();const s=await app(t,fsys,{saveRetryMs:500,saveWaitMs:1200});
+  fsys.fail.write=true;await s.record();await settle(1500);await s.record();await settle(1500);
+  assert.equal(appState(s).reports.length,1);assert.equal(saved(fsys).reports.length,0);
+  assert.equal(!!s.w.document.querySelector('.pj-stage'),false);
+  fsys.fail.write=false;
+  for(let i=0;i<30&&saved(fsys).reports.length===0;i++)await settle(100);
+  assert.equal(saved(fsys).reports.length,1);
+});
+test('a different activity recorded after a failed save is a new record',async t=>{
+  const fsys=fakeFilesystem();const s=await app(t,fsys);
+  fsys.fail.write=true;await s.record();await settle(1500);
+  fsys.fail.write=false;
+  s.w.document.querySelector('.fab').click();await settle();await s.click('ストレッチ');await s.click('報告する ✓');
+  assert.ok(await praised(s));
+  assert.deepEqual(appState(s).reports.map(r=>r.aid),['run','stretch']);
+  assert.deepEqual(saved(fsys).reports.map(r=>r.aid),['run','stretch']);
+});
 test('a failed device save is pending, not praised, and the automatic retry saves that one record once',async t=>{
   const fsys=fakeFilesystem();const s=await app(t,fsys,{saveRetryMs:400,saveWaitMs:1200});
   fsys.fail.write=true;
   await s.record();await settle(1500);
-  assert.equal(s.w.document.querySelector('.pj-stage'),null,'no praise screen');
+  assert.equal(!!s.w.document.querySelector('.pj-stage'),false,'no praise screen');
   const pending=s.w.document.getElementById('yt-native-save-error').textContent;
   assert.match(pending,/まだ完了していません/);assert.match(pending,/もう一度記録する必要はありません/);
   assert.equal(saved(fsys).reports.length,0,'the new record is not in the committed copy yet');
@@ -61,10 +92,10 @@ test('a failed device save is pending, not praised, and the automatic retry save
   fsys.fail.write=false;
   for(let i=0;i<30&&saved(fsys).reports.length===0;i++)await settle(100);
   assert.equal(saved(fsys).reports.length,1,'exactly one record after failure and automatic retry');
-  assert.equal(s.w.document.getElementById('yt-native-save-error'),null);
+  assert.equal(!!s.w.document.getElementById('yt-native-save-error'),false);
   assert.equal(s.w.document.getElementById('yt-native-save-ok').getAttribute('role'),'status');
   assert.match(s.w.document.getElementById('yt-native-save-ok').textContent,/保存しました/);
-  assert.equal(s.w.document.querySelector('.pj-stage'),null,'the retried record is not praised a second time');
+  assert.equal(!!s.w.document.querySelector('.pj-stage'),false,'the retried record is not praised a second time');
   // A new, separate record afterwards is saved and praised normally.
   await s.record();
   for(let i=0;i<30&&!s.w.document.querySelector('.pj-stage');i++)await settle(100);

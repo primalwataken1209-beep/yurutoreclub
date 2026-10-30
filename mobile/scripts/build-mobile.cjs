@@ -103,7 +103,18 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   // The record screen waits until the new record is committed to the device file; a failure is not praised.
   source=once(source,"    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n",
     "    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n"+
-    "    if(!(await window.YT_NATIVE_STORAGE.whenSaved('yurutore-v6-'))){setShowRep(false);setPostAfter(false);return;}\n",'record save');
+    "    if(!(await window.YT_NATIVE_STORAGE.whenSaved('yurutore-v6-'))){window.YT_NATIVE_STORAGE.markPending(nr);setShowRep(false);setPostAfter(false);return;}\n",'record save');
+  // Submitting the same record again after a failed device save retries that record: the streak, rewards and
+  // praise are computed as if it were added once, and the new entry replaces the pending one in the state.
+  source=once(source,'  const submitRep=async({aid,note,photo})=>{\n',
+    '  const submitRep=async(ytArgs)=>{\n'+
+    '    const ytPending=window.YT_NATIVE_STORAGE.pendingRecord(ytArgs);\n'+
+    '    return ytSubmitRep(ytArgs,ytPending?{...st,reports:st.reports.filter(x=>x.id!==ytPending.id)}:st,ytPending);\n'+
+    '  };\n'+
+    '  const ytSubmitRep=async({aid,note,photo},st,ytPending)=>{\n','record retry');
+  source=once(source,"    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n",
+    "    setSt(s=>{const base=ytPending?s.reports.filter(x=>x.id!==ytPending.id):s.reports;\n"+
+    "      return {...s,reports:[...base,nr],...(willPost?{posted:[...(s.posted||[]).filter(id=>!ytPending||id!==ytPending.id),nr.id]}:{})};});\n",'record append');
   const bundle=compile(source);
 
   const csp=["default-src 'self'","script-src 'self'","style-src 'self' 'unsafe-inline'",

@@ -115,6 +115,14 @@
       waiters.push(w);
     });
   }
+  /* A record whose device save failed. Submitting the same record again (same activity, note and photo
+     presence) retries that record instead of adding a second one; any committed save clears it. */
+  var pending=null;
+  function markPending(r){pending=r?{id:r.id,aid:r.aid,note:r.note||'',photo:!!r.photo}:null;}
+  function pendingRecord(a){
+    if(!pending||!a)return null;
+    return pending.aid===a.aid&&pending.note===String(a.note||'')&&pending.photo===!!a.photo?pending:null;
+  }
   function changed(key,removed){
     state.changes++;
     // The generation that will first lack the key (one later if a save is already in flight with the old contents).
@@ -134,7 +142,7 @@
         data:JSON.stringify({format:1,gen:gen,savedAt:Date.now(),keys:snapshot()})});
       state.gen=gen;rawSet.call(store,GEN_KEY,String(gen));ok=true;
       var recovered=state.status==='save-failed'||!!document.getElementById('yt-native-save-error');
-      state.saved=upto;state.status='saved';
+      state.saved=upto;state.status='saved';pending=null;
       if(recovered)savedAfterFailure();
       try{await FS.deleteFile({path:SLOTS[(gen+1)%2],directory:DIR});}
       catch(e){if(!missing(e))throw e;}
@@ -249,7 +257,7 @@
     ready:ready,
     status:function(){return {status:state.status,gen:state.gen,blocked:state.blocked};},
     flush:flush,
-    whenSaved:whenSaved,
+    whenSaved:whenSaved,markPending:markPending,pendingRecord:pendingRecord,
     sessionStorage:isNative&&SS&&FS?sessionStorageAdapter:null,
     clearSession:isNative&&SS&&FS?clearSession:function(){return Promise.resolve();},
     platform:platform
