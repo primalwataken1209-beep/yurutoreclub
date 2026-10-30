@@ -5,6 +5,7 @@ const { PGlite } = require('@electric-sql/pglite');
 const A='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', B='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const C='cccccccc-cccc-cccc-cccc-cccccccccccc', NOBODY='dddddddd-dddd-dddd-dddd-dddddddddddd';
 const P='11111111-1111-1111-1111-111111111111';
+const HIDDEN='eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';   // private account with nothing visible to others
 const DRAFT=fs.readFileSync('supabase/manual/store_prep_user_reports.sql','utf8');
 const ROLLBACK=fs.readFileSync('supabase/manual/store_prep_user_reports_rollback.sql','utf8');
 const report=(target,type='user',{as='auth.uid()',status}={})=>status
@@ -18,7 +19,18 @@ const LIVE_REPORTS=`
   alter table public.reports add constraint reports_status_check check (status in ('open','reviewed','actioned','dismissed'));
   drop policy "reports: insert own" on public.reports;
   create policy "staging reports insert own" on public.reports for insert to authenticated
-    with check (reporter_user_id = auth.uid() and status = 'open');`;
+    with check (reporter_user_id = auth.uid() and status = 'open');
+  -- Work, 2026-10-31 on staging: public_profiles runs with the caller's rights, so private profiles stay hidden.
+  alter view public.public_profiles set (security_invoker = true);`;
+// Staging after the first draft (c04631a) was applied on 2026-10-31.
+const AFTER_FIRST_DRAFT=LIVE_REPORTS+`
+  drop policy "staging reports insert own" on public.reports;
+  alter table public.reports drop constraint reports_target_type_check;
+  alter table public.reports add constraint reports_target_type_check check (target_type in ('post','comment','user'));
+  create policy "reports: insert own" on public.reports for insert to authenticated
+    with check (reporter_user_id = auth.uid() and status = 'open' and (target_type in ('post','comment')
+      or (target_type = 'user' and target_id <> auth.uid()
+          and exists (select 1 from public.public_profiles pp where pp.id = target_id))));`;
 
 async function database(t,live){
   const db=new PGlite();
@@ -41,10 +53,12 @@ async function database(t,live){
   for(const file of fs.readdirSync('supabase/migrations').filter(n=>n.endsWith('.sql')).sort()) {
     await db.exec(fs.readFileSync('supabase/migrations/'+file,'utf8'));
   }
-  if(live)await db.exec(LIVE_REPORTS);
-  await db.exec(`insert into auth.users(id) values ('${A}'),('${B}'),('${C}');
-    update public.profiles set is_public=false where id='${A}';
-    insert into public.posts(id,user_id,body) values ('${P}','${B}','public');`);
+  if(live)await db.exec(live);
+  // A is private but commented on B's public post; HIDDEN is private with nothing visible.
+  await db.exec(`insert into auth.users(id) values ('${A}'),('${B}'),('${C}'),('${HIDDEN}');
+    update public.profiles set is_public=false where id in ('${A}','${HIDDEN}');
+    insert into public.posts(id,user_id,body) values ('${P}','${B}','public');
+    insert into public.comments(post_id,user_id,body) values ('${P}','${A}','nice');`);
   const as=async(id,sql)=>{
     await db.exec('reset role');
     await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id||'']);
@@ -59,11 +73,14 @@ async function database(t,live){
   return {db,as,admin,shape};
 }
 
-for(const [label,live] of [['the live staging/production definition',true],['a database built from the repository migrations',false]]){
+for(const [label,live] of [['the live staging/production definition',LIVE_REPORTS],['a database built from the repository migrations',null],
+                           ['staging after the first draft (c04631a)',AFTER_FIRST_DRAFT]]){
   test('user reports on '+label,async t=>{
     const {db,as,admin,shape}=await database(t,live);
-    await t.test('before the draft, user reports are rejected by the CHECK',async()=>{
-      await assert.rejects(()=>as(B,report(C)),e=>e.code==='23514');
+    await t.test('before the draft, user reports are rejected',async()=>{
+      // The first draft accepts the public user C but, with the invoker view, rejects the private A.
+      if(live===AFTER_FIRST_DRAFT){await assert.rejects(()=>as(C,report(A)),e=>e.code==='42501');await admin("delete from public.reports");}
+      else await assert.rejects(()=>as(B,report(C)),e=>e.code==='23514');
     });
     await t.test('an unexpected extra policy stops the draft and changes nothing',async()=>{
       await admin(`create policy "extra insert" on public.reports for insert to authenticated with check (true)`);
@@ -82,9 +99,16 @@ for(const [label,live] of [['the live staging/production definition',true],['a d
       assert.deepEqual(s.policies.map(r=>[r.policyname,r.cmd]),[['reports: insert own','INSERT']]);
       assert.match(s.policies[0].with_check,/status = 'open'/);
     });
-    await t.test('another existing user can be reported, including a private account',async()=>{
+    await t.test('users the reporter can see are reportable: public, or private but met through a visible comment',async()=>{
       await as(B,report(C));
       await as(B,report(A));
+    });
+    await t.test('a private user with nothing visible is rejected like a missing one, and profile access is not widened',async()=>{
+      await assert.rejects(()=>as(B,report(HIDDEN)),e=>e.code==='42501');
+      for(const id of [A,HIDDEN]){
+        assert.equal((await as(B,`select * from public.profiles where id='${id}'`)).rows.length,0,'private profile stays hidden');
+      }
+      assert.equal((await as(B,`select * from public.comments where user_id='${A}'`)).rows.length,1,'the comment is what makes A visible');
     });
     await t.test('self, missing user, impersonation, anonymous and unknown type are rejected',async()=>{
       await assert.rejects(()=>as(B,report(B)),e=>e.code==='42501');
