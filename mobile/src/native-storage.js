@@ -52,6 +52,19 @@
     el.textContent=lang()==='en'?en:ja;
   }
   function clearAlert(id){var el=document.getElementById(id);if(el)el.remove();}
+  /* A record that is not yet committed stays in the app (it is not lost and must not be entered again);
+     saving is retried automatically and the user is told once it is safe. */
+  function pendingNotice(){
+    clearAlert('yt-native-save-ok');
+    alertBox('yt-native-save-error','記録はアプリ内に残っていますが、端末への保存がまだ完了していません。自動で保存し直しています。もう一度記録する必要はありません。空き容量も確認してください。',
+      "Your record is still in the app, but it has not been saved on this device yet. We're retrying automatically, so there's no need to record it again. Please also check free space.");
+  }
+  function savedAfterFailure(){
+    clearAlert('yt-native-save-error');
+    alertBox('yt-native-save-ok','記録を端末に保存しました。','Your record has been saved on this device.');
+    var el=document.getElementById('yt-native-save-ok');el.setAttribute('role','status');
+    setTimeout(function(){clearAlert('yt-native-save-ok');},6000);
+  }
   function restoreFailed(){
     state.blocked=true;state.status='restore-failed';
     alertBox('yt-native-restore-error','端末に保存した記録を読み込めませんでした。アプリを再起動してください。保存済みの記録は消していません。',
@@ -96,8 +109,7 @@
       var w={prefix:prefix||'yurutore-v6-',need:null,resolve:resolve};
       w.timer=setTimeout(function(){
         waiters=waiters.filter(function(x){return x!==w;});
-        alertBox('yt-native-save-error','記録を端末に保存できませんでした。空き容量を確認してください。自動でもう一度試します。',
-          "Couldn't save your records on this device. Please check free space; we'll try again automatically.");
+        pendingNotice();
         resolve(false);
       },ms||cfg.saveWaitMs||6000);
       waiters.push(w);
@@ -121,7 +133,9 @@
       await FS.writeFile({path:SLOTS[gen%2],directory:DIR,encoding:'utf8',recursive:true,
         data:JSON.stringify({format:1,gen:gen,savedAt:Date.now(),keys:snapshot()})});
       state.gen=gen;rawSet.call(store,GEN_KEY,String(gen));ok=true;
-      state.saved=upto;state.status='saved';clearAlert('yt-native-save-error');
+      var recovered=state.status==='save-failed'||!!document.getElementById('yt-native-save-error');
+      state.saved=upto;state.status='saved';
+      if(recovered)savedAfterFailure();
       try{await FS.deleteFile({path:SLOTS[(gen+1)%2],directory:DIR});}
       catch(e){if(!missing(e))throw e;}
       // Only the committed copy remains: removals older than it are already reflected in it.
@@ -132,10 +146,9 @@
         state.status='cleanup-failed';
       }else{
       state.status='save-failed';
-      alertBox('yt-native-save-error','記録を端末に保存できませんでした。空き容量を確認してください。自動でもう一度試します。',
-        "Couldn't save your records on this device. Please check free space; we'll try again automatically.");
+      pendingNotice();
       }
-      if(!retryTimer)retryTimer=setTimeout(function(){retryTimer=null;flush();},30000);
+      if(!retryTimer)retryTimer=setTimeout(function(){retryTimer=null;flush();},cfg.saveRetryMs||30000);
     }finally{
       state.flushing=false;
       settle(ok,upto);

@@ -86,6 +86,9 @@ test('native projects use the same placeholder id and callback scheme, with no s
   for(const part of ['cloud-backup','device-transfer'])assert.match(rules,new RegExp('<'+part+'>[\\s\\S]*<exclude domain="root" />[\\s\\S]*</'+part+'>'));
   const privacy=read('ios/App/App/PrivacyInfo.xcprivacy');
   assert.match(privacy,/<key>NSPrivacyTracking<\/key>\s*<false\/>/);
+  // @capacitor/filesystem requires FileTimestamp with C617.1 (files inside the app container) in the app manifest.
+  assert.match(privacy,/<key>NSPrivacyAccessedAPIType<\/key>\s*<string>NSPrivacyAccessedAPICategoryFileTimestamp<\/string>\s*<key>NSPrivacyAccessedAPITypeReasons<\/key>\s*<array>\s*<string>C617\.1<\/string>\s*<\/array>/);
+  assert.match(fs.readFileSync(path.join(mobile,'node_modules','@capacitor','filesystem','README.md'),'utf8'),/NSPrivacyAccessedAPICategoryFileTimestamp[\s\S]{0,200}C617\.1/,'plugin still documents this requirement');
   assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/PrivacyInfo\.xcprivacy in Resources/g)||[]).length,2,'privacy manifest is a bundle resource');
   const pbx=read('ios/App/App.xcodeproj/project.pbxproj');
   assert.ok(pbx.split('PRODUCT_BUNDLE_IDENTIFIER = '+id+';').length>1);

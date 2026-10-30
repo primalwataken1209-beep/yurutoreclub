@@ -132,3 +132,9 @@ jobs:
         run: |
           if grep -rq 'eszheiabjwehcbrteqza' ios/App/App/public; then exit 1; fi
           find "$RUNNER_TEMP/dd" -path '*App.app/PrivacyInfo.xcprivacy' | grep -q .
+      - name: Validate the bundled privacy manifest (FileTimestamp / C617.1 for @capacitor/filesystem)
+        run: |
+          manifest=$(find "$RUNNER_TEMP/dd" -path '*App.app/PrivacyInfo.xcprivacy' | head -n1)
+          plutil -lint "$manifest"
+          plutil -convert json -o "$RUNNER_TEMP/privacy.json" "$manifest"
+          node -e "const m=require(process.argv[1]);const t=m.NSPrivacyAccessedAPITypes.find(x=>x.NSPrivacyAccessedAPIType==='NSPrivacyAccessedAPICategoryFileTimestamp');if(!t||!t.NSPrivacyAccessedAPITypeReasons.includes('C617.1')||m.NSPrivacyTracking!==false)process.exit(1);console.log('privacy manifest ok')" "$RUNNER_TEMP/privacy.json"

@@ -18,11 +18,13 @@ function staging({apple=false}={}){
   build({root,mobile,out:builds[id],target:'staging',apple,env:{YT_STAGING_PUBLISHABLE_KEY:KEY}});
   return builds[id];
 }
-async function launch(t,{fsys=fakeFilesystem(),platform='android',apple=false,lang='ja',fetch}={}){
+async function launch(t,{fsys=fakeFilesystem(),platform='android',apple=false,lang='ja',fetch,config}={}){
   const out=staging({apple}),remote=[],errors=[],log={open:[],close:0,minimized:0,listeners:{}};
   class Bundle extends ResourceLoader{fetch(url){
     const u=new URL(url);if(u.origin!=='https://localhost'){remote.push(url);return null;}
     if(u.pathname==='/vendor/capacitor.js')return Promise.resolve(Buffer.from(CORE_STUB));
+    if(u.pathname==='/native-config.js'&&config)return Promise.resolve(Buffer.from(fs.readFileSync(path.join(out,'native-config.js'),'utf8')+
+      'window.YT_NATIVE_CONFIG=Object.freeze(Object.assign({},window.YT_NATIVE_CONFIG,'+JSON.stringify(config)+'));'));
     const p=path.join(out,decodeURIComponent(u.pathname));
     return Promise.resolve(fs.readFileSync(p.endsWith(path.sep)?path.join(p,'index.html'):p));
   }}

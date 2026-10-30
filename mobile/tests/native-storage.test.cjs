@@ -85,7 +85,7 @@ test('a failed save is shown, not reported as saved, and retried on the next cha
   const s=boot(t);await s.S().ready;
   s.fsys.fail.write=true;s.w.localStorage.setItem(U1,'x');await settle(400);
   assert.equal(s.S().status().status,'save-failed');assert.equal(s.w.localStorage.getItem('yt-native-mirror-gen'),'0');
-  assert.match(s.w.document.getElementById('yt-native-save-error').textContent,/保存できませんでした/);
+  assert.match(s.w.document.getElementById('yt-native-save-error').textContent,/まだ完了していません/);
   s.fsys.fail.write=false;s.w.localStorage.setItem(U1,'y');await settle(400);
   assert.equal(s.S().status().status,'saved');assert.equal(s.w.document.getElementById('yt-native-save-error'),null);
   assert.deepEqual(s.file(B).keys,{[U1]:'y'});
