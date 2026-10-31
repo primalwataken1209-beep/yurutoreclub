@@ -6,7 +6,7 @@ const {build}=require('../scripts/build-mobile.cjs');
 const {installNative,fire}=require('./fakes.cjs');
 const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
 const KEY='sb_publishable_TESTONLY_not_a_real_key';
-const SUPA='https://knftduojdalnawvkbelt.supabase.co',CALLBACK='club.yurutore.dev.placeholder://auth/callback';
+const SUPA='https://knftduojdalnawvkbelt.supabase.co',CALLBACK='club.yurutore.app://auth/callback';
 let www;
 function staging(t){
   if(www)return www;
@@ -44,7 +44,7 @@ test('Google sign-in opens the system browser with PKCE and the exact callback',
 test('only the exact callback exchanges a code, through the build target only',async t=>{
   const {w,log}=shell(t);const c=client(w);w.YT_NATIVE.attach(c);
   await w.YT_NATIVE.oauthSignIn('google');
-  for(const bad of ['club.yurutore.dev.placeholder://auth/other?code=x','club.yurutore.dev.placeholder://evil/callback?code=x',
+  for(const bad of ['club.yurutore.app://auth/other?code=x','club.yurutore.app://evil/callback?code=x',
                     'other.scheme://auth/callback?code=x','https://localhost/auth/callback?code=x','not a url'])
     assert.equal(await w.YT_NATIVE.handleUrl(bad),false,bad);
   assert.equal(w.document.querySelector('[role=alert]'),null,'ignored links show nothing');

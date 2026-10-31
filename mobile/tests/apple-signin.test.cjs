@@ -2,8 +2,8 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const {launch,staging,settle}=require('./app-harness.cjs');
-const SUPA='https://knftduojdalnawvkbelt.supabase.co',CALLBACK='club.yurutore.dev.placeholder://auth/callback';
-// Code-level checks only: no Apple Developer account, Services ID, key or Supabase provider exists yet.
+const SUPA='https://knftduojdalnawvkbelt.supabase.co',CALLBACK='club.yurutore.app://auth/callback';
+// Code-level checks only: the App ID is registered, but no Services ID, key or Supabase Apple provider exists yet.
 async function signInScreen(t,opts){
   const s=await launch(t,opts);
   await s.click(opts.lang==='en'?'Log in or sign up':'ログイン・新規登録はこちら');

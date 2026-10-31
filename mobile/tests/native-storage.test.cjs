@@ -6,7 +6,7 @@ const {build}=require('../scripts/build-mobile.cjs');
 const {fakeFilesystem,fakeSecureStorage,installNative,fire}=require('./fakes.cjs');
 const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
 const KEY='sb_publishable_TESTONLY_not_a_real_key',SUPA='https://knftduojdalnawvkbelt.supabase.co';
-const CALLBACK='club.yurutore.dev.placeholder://auth/callback';
+const CALLBACK='club.yurutore.app://auth/callback';
 const DIR='LIBRARY_NO_CLOUD',A='LIBRARY_NO_CLOUD/yt-records-a.json',B='LIBRARY_NO_CLOUD/yt-records-b.json';
 const U1='yurutore-v6-android-11111111-1111-1111-1111-111111111111',U2='yurutore-v6-android-22222222-2222-2222-2222-222222222222';
 const settle=(ms=120)=>new Promise(r=>setTimeout(r,ms));

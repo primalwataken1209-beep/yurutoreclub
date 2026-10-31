@@ -25,7 +25,7 @@
 			<string>auth-callback</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>club.yurutore.dev.placeholder</string>
+				<string>club.yurutore.app</string>
 			</array>
 		</dict>
 	</array>

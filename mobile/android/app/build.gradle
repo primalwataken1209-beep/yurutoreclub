@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "club.yurutore.dev.placeholder"
+    namespace = "club.yurutore.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "club.yurutore.dev.placeholder"
+        applicationId "club.yurutore.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

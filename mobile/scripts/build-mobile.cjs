@@ -10,7 +10,8 @@ const TARGETS={
   staging:{ref:'knftduojdalnawvkbelt',keyEnv:'YT_STAGING_PUBLISHABLE_KEY'},
   production:{ref:'eszheiabjwehcbrteqza'}
 };
-const PLACEHOLDER_ID=/\.dev\.placeholder$/;
+// The approved store ID (Android applicationId / iOS Bundle ID). Closed testing uses the same ID as the public release.
+const OFFICIAL_APP_ID='club.yurutore.app';
 const PRODUCTION_CONFIRM='I_HAVE_RELEASE_APPROVAL';
 const VENDOR=[
   ['react.production.min.js','react/umd/react.production.min.js'],
@@ -61,7 +62,8 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   if(target==='production'){
     if(env.YT_MOBILE_PRODUCTION_BUILD!==PRODUCTION_CONFIRM||!approval)
       throw Error('Production mobile builds need --release-approval=<label> and YT_MOBILE_PRODUCTION_BUILD='+PRODUCTION_CONFIRM);
-    if(PLACEHOLDER_ID.test(scheme))throw Error('Production build refused: appId is still the development placeholder');
+    // The approval label and confirmation are what open the production output; a correct ID alone never does.
+    if(scheme!==OFFICIAL_APP_ID)throw Error('Production build refused: appId must be '+OFFICIAL_APP_ID);
   }
   const supabaseUrl='https://'+t.ref+'.supabase.co';
   let key=null;
@@ -166,7 +168,7 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   return {target,supabaseUrl,appId:scheme,files:files.length+1};
 }
 
-module.exports={build,options,TARGETS,PRODUCTION_CONFIRM};
+module.exports={build,options,TARGETS,PRODUCTION_CONFIRM,OFFICIAL_APP_ID};
 if(require.main===module){
   const mobile=path.resolve(__dirname,'..');
   const o=options(process.argv.slice(2),process.env);

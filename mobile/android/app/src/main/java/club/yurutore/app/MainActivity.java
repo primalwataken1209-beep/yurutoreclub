@@ -1,4 +1,4 @@
-package club.yurutore.dev.placeholder;
+package club.yurutore.app;
 
 import com.getcapacitor.BridgeActivity;
 

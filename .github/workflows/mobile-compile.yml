@@ -95,7 +95,7 @@ jobs:
           if grep -q 'android:debuggable="true"' "$RUNNER_TEMP/manifest.xml"; then exit 1; fi
           if grep -q 'android:usesCleartextTraffic="true"' "$RUNNER_TEMP/manifest.xml"; then exit 1; fi
           grep -q 'android:allowBackup="false"' "$RUNNER_TEMP/manifest.xml"
-          grep -q 'package="club.yurutore.dev.placeholder"' "$RUNNER_TEMP/manifest.xml"
+          grep -q 'package="club.yurutore.app"' "$RUNNER_TEMP/manifest.xml"
           # androidx.core adds its own signature-level <appId>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION; everything else must be INTERNET only.
           perms=$(grep -o 'uses-permission android:name="[^"]*"' "$RUNNER_TEMP/manifest.xml" | grep -v '\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"' | sort -u)
           echo "$perms"

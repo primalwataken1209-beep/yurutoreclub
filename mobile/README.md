@@ -49,26 +49,24 @@ npm test              # この土台のテスト（ネットワーク不要）
 ```
 
 本番向けの出力は `--target=production --release-approval=<承認ラベル>` と
-`YT_MOBILE_PRODUCTION_BUILD=I_HAVE_RELEASE_APPROVAL` の両方が必要。さらに、appId が開発用の
-仮ID（`*.dev.placeholder`）のままでは拒否する。現時点では作れない。
+`YT_MOBILE_PRODUCTION_BUILD=I_HAVE_RELEASE_APPROVAL` の両方が必要で、appId が正式 ID `club.yurutore.app` でなければ拒否する。
+正式 ID がリポジトリに入っていても、承認ラベルと確認の変数がなければ作れない（テストで確認）。
 
-## ID（すべて仮・未登録）
+## ID
 
-正式 ID の候補（本番 `club.yurutore.app`、staging `club.yurutore.app.staging`）と戻り先 URL の仕様は `docs/mobile-ids-and-auth.md`。
-
-- appId / applicationId / Bundle ID: `club.yurutore.dev.placeholder`
-- 認証の戻り先: `club.yurutore.dev.placeholder://auth/callback`
-- 正式IDは、ストアのアカウントと ID 登録を本人が行ってから決める。変更する箇所は
-  `capacitor.config.json`、`android/app/build.gradle`、`android/app/src/main/res/values/strings.xml`、
-  Java パッケージのフォルダ、`ios/App/App.xcodeproj/project.pbxproj`、`ios/App/App/Info.plist`。
+- appId / applicationId / Bundle ID: `club.yurutore.app`（2026-10-31 本人承認。閉鎖テストも正式公開と同じ ID）
+- 認証の戻り先: `club.yurutore.app://auth/callback`（staging と本番で同じ。接続先の Supabase だけが違う）
+- Apple：Team `9S43D53PCM` に App ID を登録済み。証明書・Profile・Keys・App Store Connect のアプリは未作成。Google Play のアプリは未作成
+- staging のビルドも同じ ID になるため、ストアへ上げる前に `build-info.json` が production であることと、表示名の「STG」を外したことを確認する
+- 詳細と、ID が出てくるファイルの一覧は `docs/mobile-ids-and-auth.md`
 
 ## 未対応・承認や登録が必要なもの
 
 | 項目 | 状態 | 必要なこと |
 |---|---|---|
-| staging の Redirect URL 登録 | 未 | Supabase staging の Auth に `club.yurutore.dev.placeholder://auth/callback` を追加（Work管理） |
+| staging の Redirect URL 登録 | 未 | Supabase staging の Auth に `club.yurutore.app://auth/callback` を追加（Work管理） |
 | Google ログインの実機確認 | 未 | 上の登録後、Android/iOS 実機で確認 |
-| Apple でサインイン | **コードのみ実装・既定で無効・実機未確認** | PKCE ブラウザ方式とボタン（iOS のみ、`--enable-apple-signin` のビルドだけ）、13 歳確認、失敗時の文言を実装しテスト済み。Apple Developer 登録（課金）、Services ID・鍵の作成、Supabase の Apple provider 設定、退会時のトークン取り消しは未実施・承認待ち。詳細は `docs/mobile-ids-and-auth.md` |
+| Apple でサインイン | **コードのみ実装・既定で無効・実機未確認** | PKCE ブラウザ方式とボタン（iOS のみ、`--enable-apple-signin` のビルドだけ）、13 歳確認、失敗時の文言を実装しテスト済み。Apple Developer Program の契約と App ID 登録は済み。Sign in with Apple の有効化、Services ID・鍵の作成、Supabase の Apple provider 設定、退会時のトークン取り消し（設計案は `docs/apple-token-revocation-design.md`）は未実施・承認待ち。詳細は `docs/mobile-ids-and-auth.md` |
 | メール確認・パスワード再設定のアプリ内復帰 | 未検証 | 戻り先はアプリのスキームになる。メールアプリからの復帰と PASSWORD_RECOVERY の動きを実機で確認する |
 | 署名 | 未 | upload key / 配布証明書の作成は本人。リポジトリに鍵を置かない |
 | アイコン・スプラッシュ | Capacitor 既定のまま | 素材の作成 |

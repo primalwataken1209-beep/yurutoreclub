@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {build,PRODUCTION_CONFIRM}=require('../scripts/build-mobile.cjs');
+const {build,PRODUCTION_CONFIRM,OFFICIAL_APP_ID}=require('../scripts/build-mobile.cjs');
 const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
 const KEY='sb_publishable_TESTONLY_not_a_real_key';
 const STAGING='knftduojdalnawvkbelt',PRODUCTION='eszheiabjwehcbrteqza';
@@ -27,7 +27,7 @@ test('staging is the default target and bundles everything locally',t=>{
   for(const rel of files(out).filter(f=>/\.(html|js|css|json)$/.test(f)))
     assert.ok(!fs.readFileSync(path.join(out,rel),'utf8').includes(PRODUCTION),'production reference in '+rel);
   const cfg=fs.readFileSync(path.join(out,'native-config.js'),'utf8');
-  assert.match(cfg,/"redirectUrl":"club\.yurutore\.dev\.placeholder:\/\/auth\/callback"/);
+  assert.match(cfg,/"redirectUrl":"club\.yurutore\.app:\/\/auth\/callback"/);
   assert.match(cfg,/"oauthProviders":\["google"\]/);assert.match(cfg,/"allowedExternalOrigins":\[\]/);
 });
 test('static files and vendored libraries are byte-identical to their sources',t=>{
@@ -54,14 +54,27 @@ test('production output needs approval, confirmation and real app IDs',t=>{
   assert.throws(()=>build({root,mobile,out,target:'production',env:{}}),/release-approval/);
   assert.throws(()=>build({root,mobile,out,target:'production',approval:'x',env:{}}),/release-approval/);
   assert.throws(()=>build({root,mobile,out,target:'production',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}}),/release-approval/);
-  assert.throws(()=>build({root,mobile,out,target:'production',approval:'x',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}}),/placeholder/);
+  for(const appId of ['club.yurutore.dev.placeholder','club.yurutore.app.staging','com.example.other'])
+    assert.throws(()=>build({root,mobile,out,target:'production',approval:'x',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM},config:{appId}}),/appId must be club\.yurutore\.app/,appId);
   assert.equal(fs.existsSync(out),false);
-  // With a non-placeholder id (test-only object, not the repository config) the guard opens.
-  const r=build({root,mobile,out,target:'production',approval:'x',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM},
-    config:{appId:'com.example.reviewonly'}});
+  // Only approval label + confirmation + the approved ID together open the production output (repository config).
+  const r=build({root,mobile,out,target:'production',approval:'x',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}});
   assert.equal(r.supabaseUrl,'https://'+PRODUCTION+'.supabase.co');
   for(const rel of files(out).filter(f=>/\.(html|js|css|json)$/.test(f)))
     assert.ok(!fs.readFileSync(path.join(out,rel),'utf8').includes(STAGING),'staging reference in '+rel);
+});
+test('the approved ID in the repository does not open production by itself',t=>{
+  const cfg=JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8'));
+  assert.equal(cfg.appId,OFFICIAL_APP_ID);assert.equal(OFFICIAL_APP_ID,'club.yurutore.app');
+  const out=path.join(tmp(t),'www');
+  for(const [approval,env] of [[undefined,{}],['x',{}],[undefined,{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}],
+                               ['x',{YT_MOBILE_PRODUCTION_BUILD:'yes'}],['',{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}]])
+    assert.throws(()=>build({root,mobile,out,target:'production',approval,env}),/release-approval/,JSON.stringify([approval,env]));
+  assert.equal(fs.existsSync(out),false);
+  // The CLI default stays staging even with the approved ID, and staging still needs its own key.
+  const {options}=require('../scripts/build-mobile.cjs');
+  assert.equal(options([],{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}).target,'staging');
+  assert.throws(()=>build({root,mobile,out,target:'staging',env:{YT_MOBILE_PRODUCTION_BUILD:PRODUCTION_CONFIRM}}),/publishable key/);
 });
 test('unknown target, existing output and unsafe app ids are refused',t=>{
   const {options}=require('../scripts/build-mobile.cjs');
@@ -71,9 +84,16 @@ test('unknown target, existing output and unsafe app ids are refused',t=>{
   assert.throws(()=>build({root,mobile,out,target:'staging',env:{YT_STAGING_PUBLISHABLE_KEY:KEY}}),/already exists/);
   assert.throws(()=>run(t,{config:{appId:'Bad Id'}}),/reverse-DNS/);
 });
-test('native projects use the same placeholder id and callback scheme, with no signing set up',()=>{
+test('native projects use the approved id and callback scheme, with no signing set up',()=>{
   const id=JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8')).appId;
+  assert.equal(id,'club.yurutore.app');
   const read=rel=>fs.readFileSync(path.join(mobile,rel),'utf8');
+  assert.match(read('android/app/build.gradle'),/namespace = "club\.yurutore\.app"/);
+  assert.match(read('android/app/src/main/res/values/strings.xml'),/<string name="package_name">club\.yurutore\.app<\/string>/);
+  assert.match(read('android/app/src/main/java/club/yurutore/app/MainActivity.java'),/^package club\.yurutore\.app;/);
+  assert.equal(fs.existsSync(path.join(mobile,'android/app/src/main/java/club/yurutore/dev')),false,'old package folder removed');
+  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)||[]).join('|'),
+    'PRODUCT_BUNDLE_IDENTIFIER = club.yurutore.app;|PRODUCT_BUNDLE_IDENTIFIER = club.yurutore.app;');
   const gradle=read('android/app/build.gradle');
   assert.match(gradle,new RegExp('applicationId "'+id.replace(/\./g,'\\.')+'"'));
   assert.doesNotMatch(gradle,/signingConfigs|storeFile|keyAlias/);
@@ -114,9 +134,9 @@ test('compile CI is read-only, SHA-pinned, secret-free and unsigned',()=>{
   assert.match(yml,/if grep -Eq 'signingConfigs\|storeFile' android\/app\/build\.gradle; then exit 1; fi/);
   assert.match(yml,/--target=staging/);assert.doesNotMatch(yml,/--target=production/);
 });
-test('repository config has no server.url and keeps the placeholder id',()=>{
+test('repository config has no server.url and uses the approved id',()=>{
   const cfg=JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8'));
   assert.equal(cfg.server.url,undefined);assert.deepEqual(cfg.server.allowNavigation,[]);
-  assert.equal(cfg.webDir,'www');assert.match(cfg.appId,/\.dev\.placeholder$/);
+  assert.equal(cfg.webDir,'www');assert.equal(cfg.appId,'club.yurutore.app');
   assert.equal(cfg.server.cleartext,undefined);assert.equal(cfg.android.allowMixedContent,false);
 });
