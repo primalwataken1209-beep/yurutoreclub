@@ -1,0 +1,140 @@
+# Compile-only checks for the Capacitor shell in mobile/.
+# Standard GitHub-hosted runners only; no secrets, no release signing, no upload, no deploy.
+# Android assembleDebug signs with the toolchain's throwaway debug key; iOS is built with signing disabled.
+# The bundle is a staging build with a compile-only placeholder key, so the result cannot reach any project.
+name: Mobile compile (no release signing, staging bundle)
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - 'index.html'
+      - 'app.js'
+      - '.github/workflows/mobile-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  YT_STAGING_PUBLISHABLE_KEY: sb_publishable_CI_COMPILE_ONLY_not_a_key
+  CI: 'true'
+
+jobs:
+  web-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+
+  android:
+    needs: web-bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify the committed Gradle wrapper against the official checksum
+        run: |
+          expected=7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172
+          echo "$expected  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+          grep -q '^distributionSha256Sum=' android/gradle/wrapper/gradle-wrapper.properties
+      - run: node scripts/build-mobile.cjs --target=staging
+      - run: npx cap sync android
+      - name: Assemble debug build without release signing (compile check only)
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Confirm no release signing or production reference in the build
+        run: |
+          # bash -e ignores '! cmd', so fail explicitly
+          if grep -rq 'eszheiabjwehcbrteqza' android/app/src/main/assets/public; then exit 1; fi
+          if grep -Eq 'signingConfigs|storeFile' android/app/build.gradle; then exit 1; fi
+          ls -l android/app/build/outputs/apk/debug/
+      - name: Assemble release AAB without any signing config (compile and inspection only)
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon bundleRelease
+      - name: Inspect the release AAB (unsigned, not debuggable, no backup, staging only)
+        env:
+          BUNDLETOOL_SHA256: a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29
+        run: |
+          aab=android/app/build/outputs/bundle/release/app-release.aab
+          test -f "$aab"
+          if unzip -l "$aab" | grep -Eq 'META-INF/.*\.(RSA|DSA|EC)$'; then echo 'AAB is signed'; exit 1; fi
+          jarsigner -verify "$aab" | tee "$RUNNER_TEMP/jarsigner.txt"
+          grep -q 'jar is unsigned' "$RUNNER_TEMP/jarsigner.txt"
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo "$BUNDLETOOL_SHA256  $RUNNER_TEMP/bundletool.jar" | sha256sum -c -
+          java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest --bundle "$aab" > "$RUNNER_TEMP/manifest.xml"
+          cat "$RUNNER_TEMP/manifest.xml"
+          if grep -q 'android:debuggable="true"' "$RUNNER_TEMP/manifest.xml"; then exit 1; fi
+          if grep -q 'android:usesCleartextTraffic="true"' "$RUNNER_TEMP/manifest.xml"; then exit 1; fi
+          grep -q 'android:allowBackup="false"' "$RUNNER_TEMP/manifest.xml"
+          grep -q 'package="club.yurutore.app"' "$RUNNER_TEMP/manifest.xml"
+          # androidx.core adds its own signature-level <appId>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION; everything else must be INTERNET only.
+          perms=$(grep -o 'uses-permission android:name="[^"]*"' "$RUNNER_TEMP/manifest.xml" | grep -v '\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"' | sort -u)
+          echo "$perms"
+          test "$perms" = 'uses-permission android:name="android.permission.INTERNET"'
+          mkdir "$RUNNER_TEMP/aab" && unzip -q "$aab" 'base/assets/public/*' -d "$RUNNER_TEMP/aab"
+          if grep -rq 'eszheiabjwehcbrteqza' "$RUNNER_TEMP/aab"; then exit 1; fi
+          grep -q 'knftduojdalnawvkbelt' "$RUNNER_TEMP/aab/base/assets/public/app.bundle.js"
+
+  ios:
+    needs: web-bundle
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/build-mobile.cjs --target=staging
+      - run: npx cap sync ios
+      - run: xcodebuild -version
+      - name: Build for the simulator without code signing (compile check only)
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Confirm no production reference and the privacy manifest is bundled
+        run: |
+          if grep -rq 'eszheiabjwehcbrteqza' ios/App/App/public; then exit 1; fi
+          find "$RUNNER_TEMP/dd" -path '*App.app/PrivacyInfo.xcprivacy' | grep -q .
+      - name: Validate the bundled privacy manifest (FileTimestamp / C617.1 for @capacitor/filesystem)
+        run: |
+          manifest=$(find "$RUNNER_TEMP/dd" -path '*App.app/PrivacyInfo.xcprivacy' | head -n1)
+          plutil -lint "$manifest"
+          plutil -convert json -o "$RUNNER_TEMP/privacy.json" "$manifest"
+          node -e "const m=require(process.argv[1]);const t=m.NSPrivacyAccessedAPITypes.find(x=>x.NSPrivacyAccessedAPIType==='NSPrivacyAccessedAPICategoryFileTimestamp');if(!t||!t.NSPrivacyAccessedAPITypeReasons.includes('C617.1')||m.NSPrivacyTracking!==false)process.exit(1);console.log('privacy manifest ok')" "$RUNNER_TEMP/privacy.json"
