@@ -11,9 +11,16 @@
 | Google Play | 本人確認は完了 | アプリは未作成 |
 
 - 以前の開発用の仮 ID（`club.yurutore.dev.placeholder`）と、staging 用の別 ID 案（`club.yurutore.app.staging`）は使わない。
-- staging に接続するビルドも同じ ID になる。**staging のビルドをストアへ上げないこと**：上げる前に、AAB / アプリ内の
-  `public/build-info.json` が `"target": "production"` であり、`app.bundle.js` が本番プロジェクトを指すことを確認する。
-  あわせて、表示名（`capacitor.config.json` の appName、Android の `strings.xml`、iOS の CFBundleDisplayName）の「STG」を外す。
+- 配信は2種類に分ける。どちらも、実際に配信する前に対象のビルドと配信先を示した**別の承認**が必要。
+
+  | 種類 | ID | 接続先 | 表示名 | 確認すること |
+  |---|---|---|---|---|
+  | 内部テスト・クローズドテスト（Play の内部/クローズド、TestFlight） | `club.yurutore.app` | staging（`knftduojdalnawvkbelt`） | 「ゆるトレ倶楽部 STG」 | `build-info.json` が `"target": "staging"`、表示名に「STG」がある |
+  | 正式公開（Play の製品版、App Store） | `club.yurutore.app` | 本番（`eszheiabjwehcbrteqza`） | 「STG」なし | `build-info.json` が `"target": "production"`、`app.bundle.js` が本番だけを参照、表示名から「STG」を外した |
+
+- **テスト用の成果物（staging に接続する AAB / IPA）を、そのまま正式公開へ昇格させない。** Play のトラック間の昇格や
+  TestFlight からの審査提出には、正式公開用に本番向けでビルドし直したものだけを使う（ID が同じなので、成果物だけでは区別できない）。
+- 正式公開用のビルドに必要な変更（表示名から「STG」を外す、本番の承認ラベルでの出力）は、正式公開の承認後に行う。
 - 本番向けの出力は `build-mobile.cjs` のガードで、承認ラベル・`YT_MOBILE_PRODUCTION_BUILD=I_HAVE_RELEASE_APPROVAL`・
   正式 ID の3つがそろわないと作れない。正式 ID だけでは開かない（`build-mobile.test.cjs` で確認）。
 - ID が出てくるファイル：`mobile/capacitor.config.json`、`mobile/android/app/build.gradle`（namespace・applicationId）、

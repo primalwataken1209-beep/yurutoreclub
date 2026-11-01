@@ -57,7 +57,7 @@ npm test              # この土台のテスト（ネットワーク不要）
 - appId / applicationId / Bundle ID: `club.yurutore.app`（2026-10-31 本人承認。閉鎖テストも正式公開と同じ ID）
 - 認証の戻り先: `club.yurutore.app://auth/callback`（staging と本番で同じ。接続先の Supabase だけが違う）
 - Apple：Team `9S43D53PCM` に App ID を登録済み。証明書・Profile・Keys・App Store Connect のアプリは未作成。Google Play のアプリは未作成
-- staging のビルドも同じ ID になるため、ストアへ上げる前に `build-info.json` が production であることと、表示名の「STG」を外したことを確認する
+- 内部・クローズドテストは同じ ID・staging 接続・表示名「STG」で配り、正式公開だけを本番向けにビルドし直す（テスト成果物を正式公開へ昇格させない）。どちらの配信も別承認が必要。詳細は `docs/mobile-ids-and-auth.md`
 - 詳細と、ID が出てくるファイルの一覧は `docs/mobile-ids-and-auth.md`
 
 ## 未対応・承認や登録が必要なもの
