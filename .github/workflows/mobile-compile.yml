@@ -103,6 +103,16 @@ jobs:
           mkdir "$RUNNER_TEMP/aab" && unzip -q "$aab" 'base/assets/public/*' -d "$RUNNER_TEMP/aab"
           if grep -rq 'eszheiabjwehcbrteqza' "$RUNNER_TEMP/aab"; then exit 1; fi
           grep -q 'knftduojdalnawvkbelt' "$RUNNER_TEMP/aab/base/assets/public/app.bundle.js"
+      - name: Dry-run the manual staging AAB inspection (must stop only at the compile-only key)
+        run: |
+          # Every earlier check of scripts/inspect-staging-aab.sh must pass on this real AAB; the placeholder key is the last check.
+          set +e
+          bash scripts/inspect-staging-aab.sh android/app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/bundletool.jar" "$RUNNER_TEMP/inspect" 2> "$RUNNER_TEMP/inspect.err"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/inspect.err"
+          test "$code" -ne 0
+          grep -qx 'AAB inspection failed: compile-only placeholder key in bundle' "$RUNNER_TEMP/inspect.err"
 
   ios:
     needs: web-bundle
