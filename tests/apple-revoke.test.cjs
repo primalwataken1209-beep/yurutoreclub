@@ -50,16 +50,26 @@ async function setup(opts = {}) {
   };
   const user = { id: USER, identities: [{ provider: 'apple', provider_id: SUB, identity_data: { sub: SUB } }] };
   const config = { teamId: TEAM, keyId: KID, clientId: CLIENT, privateKey: ec.privateKey };
-  const deps = { fetch, now, timeoutMs: 200, getAppleKeys: async () => [jwk] };
-  const nonce = 'raw-nonce-for-this-test';
+  // Server-side nonce store: issued for one user, expires, single use.
+  const nonces = new Map();
+  const issueNonce = (userId = USER, ttl = 300) => { const n = 'nonce-' + (++apple.n); nonces.set(n, { userId, exp: t() + ttl }); return n; };
+  const consumeNonce = async ({ userId, nonce, now: at }) => { const e = nonces.get(nonce); nonces.delete(nonce);
+    return !!e && e.userId === userId && Math.floor(at / 1000) <= e.exp; };
+  const deps = { fetch, now, timeoutMs: 200, getAppleKeys: async () => [jwk], consumeNonce };
+  const nonce = issueNonce();
   const nonceHash = Buffer.from(await crypto.subtle.digest('SHA-256', enc.encode(nonce))).toString('hex');
   const deleted = [];
-  const run = (over = {}) => m.deleteAccountWithApple({ user, authTime: t() - 30, config, deps, revoke: m.revokeAppleAuthorization,
+  const run = (over = {}) => m.deleteAccountWithApple({ user, config, deps, revoke: m.revokeAppleAuthorization,
     deleteAll: async () => { deleted.push(apple.calls.length); }, ...over });
-  return { m, apple, user, config, deps, idToken, nonce, nonceHash, run, deleted, t, rsa };
+  // What the server builds after admin.auth.getUser(<re-authentication JWT>) succeeded: never client input.
+  const evidence = (userId = USER, timestamp = t() - 30, extra = {}) =>
+    m.createReauthEvidence({ verifiedUser: { id: userId }, verifiedClaims: { sub: userId, iat: t(), amr: [{ method: 'oauth', timestamp }], ...extra } });
+  const hashOf = async n => Buffer.from(await crypto.subtle.digest('SHA-256', enc.encode(n))).toString('hex');
+  return { m, apple, user, config, deps, idToken, nonce, nonceHash, run, deleted, t, rsa, issueNonce, evidence, hashOf };
 }
-const nativeProof = async (s, sub = SUB, extra = {}) => ({ type: 'authorization_code', code: s.apple.code(sub),
-  identityToken: await s.idToken({ sub, nonce: s.nonceHash, ...extra }), rawNonce: s.nonce });
+// Each native proof uses a fresh server-issued nonce (single use).
+const nativeProof = async (s, sub = SUB, extra = {}, nonce = s.issueNonce()) => ({ type: 'authorization_code', code: s.apple.code(sub),
+  identityToken: await s.idToken({ sub, nonce: await s.hashOf(nonce), ...extra }), rawNonce: nonce });
 
 test('client secret is a short-lived ES256 JWT for this team and client', async () => {
   const s = await setup(); const p = await nativeProof(s);
@@ -77,7 +87,7 @@ test('native proof: code exchanged, revoked, refusal confirmed, then deleted (in
 });
 test('refresh proof from a fresh Supabase re-authentication is bound through Apple\'s id_token', async () => {
   const s = await setup(); const rt = s.apple.refresh(SUB);
-  const r = await s.run({ proof: { type: 'refresh_token', refreshToken: rt }, reauthUserId: USER });
+  const r = await s.run({ proof: { type: 'refresh_token', refreshToken: rt }, reauth: s.evidence() });
   assert.equal(r.ok, true);
   assert.deepEqual(s.apple.calls, ['/auth/token:refresh_token', '/auth/revoke', '/auth/token:refresh_token']);
   assert.equal(s.deleted.length, 1);
@@ -94,10 +104,50 @@ const refused = async (s, over, code, calls) => {
   if (calls) assert.deepEqual(s.apple.calls, calls);
 };
 test('no proof, stale re-authentication or another Supabase user: nothing is deleted', async () => {
-  const s = await setup();
+  const s = await setup(); const rt = () => ({ type: 'refresh_token', refreshToken: s.apple.refresh(SUB) });
   await refused(s, { proof: undefined }, 'apple_reauth_required', []);
-  await refused(s, { proof: await nativeProof(s), authTime: s.t() - 3600 }, 'reauth_too_old', []);
-  await refused(s, { proof: { type: 'refresh_token', refreshToken: s.apple.refresh(SUB) }, reauthUserId: '22222222-2222-2222-2222-222222222222' }, 'reauth_user_mismatch', []);
+  await refused(s, { proof: rt(), reauth: s.evidence(USER, s.t() - 3600) }, 'reauth_too_old', []);
+  await refused(s, { proof: rt(), reauth: s.evidence('22222222-2222-2222-2222-222222222222') }, 'reauth_user_mismatch', []);
+});
+test('Work 14b251b boundary: the refresh path requires server-made re-authentication evidence', async () => {
+  const s = await setup(); const rt = () => ({ type: 'refresh_token', refreshToken: s.apple.refresh(SUB) });
+  await refused(s, { proof: rt() }, 'reauth_untrusted', []);
+  // A client-sent object with the right shape is not evidence.
+  await refused(s, { proof: rt(), reauth: { userId: USER, authTime: s.t() - 10 } }, 'reauth_untrusted', []);
+  await refused(s, { proof: rt(), reauth: JSON.parse(JSON.stringify(s.evidence())) }, 'reauth_untrusted', []);
+});
+test('Work 14b251b boundary: re-authentication times must be finite, recent and not in the future', async () => {
+  const s = await setup(); const rt = () => ({ type: 'refresh_token', refreshToken: s.apple.refresh(SUB) });
+  await refused(s, { proof: rt(), reauth: s.evidence(USER, s.t() + 86400) }, 'reauth_too_old', []);
+  await refused(s, { proof: rt(), reauth: s.evidence(USER, s.t() + 120) }, 'reauth_too_old', []);
+  for (const bad of [NaN, Infinity, -Infinity, 1.5, '1800000000', null])
+    assert.throws(() => s.evidence(USER, bad), /reauth_untrusted/, String(bad));
+  // Native path: a future identity token time is refused too.
+  await refused(s, { proof: await nativeProof(s, SUB, { iat: s.t() + 86400, exp: s.t() + 90000 }) }, 'apple_proof_invalid');
+});
+test('re-authentication evidence uses the OAuth sign-in time from amr, not iat, and only verified claims', async () => {
+  const s = await setup(); const rt = () => ({ type: 'refresh_token', refreshToken: s.apple.refresh(SUB) });
+  // iat is fresh (token refreshed) but the OAuth sign-in was an hour ago.
+  await refused(s, { proof: rt(), reauth: s.evidence(USER, s.t() - 3600, { iat: s.t() }) }, 'reauth_too_old', []);
+  assert.throws(() => s.m.createReauthEvidence({ verifiedUser: { id: USER }, verifiedClaims: { sub: 'someone-else', amr: [{ method: 'oauth', timestamp: s.t() }] } }), /reauth_untrusted/);
+  assert.throws(() => s.m.createReauthEvidence({ verifiedUser: { id: USER }, verifiedClaims: { sub: USER, iat: s.t(), amr: [{ method: 'password', timestamp: s.t() }] } }), /reauth_untrusted/);
+  assert.throws(() => s.m.createReauthEvidence({ verifiedUser: { id: USER }, verifiedClaims: { sub: USER, iat: s.t() } }), /reauth_untrusted/);
+  assert.ok(Object.isFrozen(s.evidence()));
+});
+test('native nonce must be issued by the server for this user, unexpired and unused', async () => {
+  const s = await setup();
+  await refused(s, { proof: await nativeProof(s, SUB, {}, 'client-made-nonce') }, 'apple_nonce_invalid', []);
+  await refused(s, { proof: await nativeProof(s, SUB, {}, s.issueNonce('22222222-2222-2222-2222-222222222222')) }, 'apple_nonce_invalid', []);
+  await refused(s, { proof: await nativeProof(s, SUB, {}, s.issueNonce(USER, -1)) }, 'apple_nonce_invalid', []);
+  const used = s.issueNonce();
+  await refused(s, { proof: await nativeProof(s, OTHER_SUB, {}, used) }, 'apple_identity_mismatch', []);
+  await refused(s, { proof: await nativeProof(s, SUB, {}, used) }, 'apple_nonce_invalid', []);   // already consumed
+  await refused(s, { proof: await nativeProof(s), deps: { ...s.deps, consumeNonce: undefined } }, 'apple_config_missing', []);
+});
+test('a deleting user that is not a server-verified user object is refused', async () => {
+  const s = await setup();
+  await refused(s, { user: undefined, proof: await nativeProof(s) }, 'reauth_untrusted', []);
+  await refused(s, { user: { identities: s.user.identities }, proof: await nativeProof(s) }, 'reauth_untrusted', []);
 });
 test('re-authenticating with a different Apple account is refused before the code is used', async () => {
   const s = await setup();
@@ -105,28 +155,33 @@ test('re-authenticating with a different Apple account is refused before the cod
 });
 test('an arbitrary or someone else\'s refresh token is refused and nothing is revoked', async () => {
   const s = await setup();
-  await refused(s, { proof: { type: 'refresh_token', refreshToken: 'made-up' } }, 'apple_refresh_rejected', ['/auth/token:refresh_token']);
+  await refused(s, { proof: { type: 'refresh_token', refreshToken: 'made-up' }, reauth: s.evidence() }, 'apple_refresh_rejected', ['/auth/token:refresh_token']);
   const s2 = await setup();
-  await refused(s2, { proof: { type: 'refresh_token', refreshToken: s2.apple.refresh(OTHER_SUB) } }, 'apple_identity_mismatch', ['/auth/token:refresh_token']);
+  await refused(s2, { proof: { type: 'refresh_token', refreshToken: s2.apple.refresh(OTHER_SUB) }, reauth: s2.evidence() }, 'apple_identity_mismatch', ['/auth/token:refresh_token']);
   assert.equal(s2.apple.revoked.size, 0);
 });
 test('a reused authorization code is refused', async () => {
   const s = await setup(); const p = await nativeProof(s);
-  assert.equal((await s.m.revokeAppleAuthorization({ user: s.user, authTime: s.t() - 10, config: s.config, deps: s.deps, proof: p })).ok, true);
+  assert.equal((await s.m.revokeAppleAuthorization({ user: s.user, config: s.config, deps: s.deps, proof: p })).ok, true);
   s.apple.calls.length = 0;
-  await refused(s, { proof: p }, 'apple_code_rejected', ['/auth/token:authorization_code']);
+  // Same code with a new valid nonce: Apple refuses the reused code.
+  const again = { ...p, rawNonce: s.issueNonce() };
+  again.identityToken = await s.idToken({ sub: SUB, nonce: await s.hashOf(again.rawNonce) });
+  await refused(s, { proof: again }, 'apple_code_rejected', ['/auth/token:authorization_code']);
 });
 test('identity tokens with a wrong nonce, audience, issuer, expiry, age or signature are refused', async () => {
   const s = await setup();
   const forged = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign']);
   for (const [label, extra, key] of [['nonce', { nonce: 'other' }], ['aud', { aud: 'com.example.other' }], ['iss', { iss: 'https://evil.example' }],
-    ['exp', { exp: s.t() - 1 }], ['iat', { iat: s.t() - 3600 }], ['signature', {}, forged.privateKey]]) {
-    const p = { type: 'authorization_code', code: s.apple.code(SUB), identityToken: await s.idToken({ sub: SUB, nonce: s.nonceHash, ...extra }, key), rawNonce: s.nonce };
+    ['exp', { exp: s.t() - 1 }], ['iat', { iat: s.t() - 3600 }], ['iat string', { iat: String(s.t()) }], ['iat fraction', { iat: s.t() + 0.5 }],
+    ['iat missing', { iat: null }], ['exp string', { exp: String(s.t() + 600) }], ['signature', {}, forged.privateKey]]) {
+    const n = s.issueNonce();
+    const p = { type: 'authorization_code', code: s.apple.code(SUB), identityToken: await s.idToken({ sub: SUB, nonce: await s.hashOf(n), ...extra }, key), rawNonce: n };
     s.apple.calls.length = 0;
     await refused(s, { proof: p }, 'apple_proof_invalid', []);
     assert.ok(true, label);
   }
-  await refused(s, { proof: { type: 'authorization_code', code: 'x', identityToken: 'not-a-jwt', rawNonce: s.nonce } }, 'apple_proof_invalid');
+  await refused(s, { proof: { type: 'authorization_code', code: 'x', identityToken: 'not-a-jwt', rawNonce: s.issueNonce() } }, 'apple_proof_invalid');
 });
 test('revoke answering 200 without effect is not accepted as proof', async () => {
   const s = await setup({ revokeNoop: true });

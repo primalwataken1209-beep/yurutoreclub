@@ -1,6 +1,6 @@
 # 退会時の Apple 認可の取り消し：設計と隔離試験（内部資料）
 
-2026-11-01 改訂（Work のレビュー 20c9a38 を反映）。**下書きのモジュールと隔離試験だけ。** Edge Function の変更・デプロイ、
+2026-11-01 改訂（Work のレビュー 20c9a38 と、14b251b の境界試験を反映）。**下書きのモジュールと隔離試験だけ。** Edge Function の変更・デプロイ、
 Apple の鍵（.p8）や Services ID の作成、Supabase の設定、秘密情報の登録はしていない。
 **実装方式は確定しない**：2章の「未確認事項」を staging で確認してから決める。
 
@@ -29,13 +29,27 @@ Apple の鍵（.p8）や Services ID の作成、Supabase の設定、秘密情�
 
 1 が「返る」なら方式 R、「返らない」なら方式 N（ネイティブの Sign in with Apple のプラグイン追加が必要＝依存の追加も別判断）を採る。
 
-## 3. 結び付けと検証の流れ（両方式で共通の部分）
+## 3. 信頼の境界（14b251b の Work 境界試験を受けて明記）
+
+| 入力 | 出どころ | 扱い |
+|---|---|---|
+| `user`（退会する利用者） | サーバーが `admin.auth.getUser(<退会要求の JWT>)` で得た利用者だけ | クライアントから届いた利用者情報は使わない。`id` がなければ拒否（`reauth_untrusted`） |
+| `reauth`（再認証の証跡、方式 R） | サーバーが再認証の JWT を自分で検証したあと、`createReauthEvidence({verifiedUser, verifiedClaims})` で作るものだけ | 形が同じでも普通のオブジェクト（クライアントが送った `{userId, authTime}` など）は拒否する（モジュール内部の WeakSet で判定）。`verifiedClaims.sub` が利用者と一致し、`amr` に oauth の記録がちょうど1つあること |
+| 再認証の時刻 | JWT の `amr` の oauth の `timestamp` | **JWT の `iat` は使わない**（トークンを更新するたびに新しくなるため）。整数で、未来でない（時計のずれは60秒まで）、10分以内であること |
+| `proof`（コード・identity token・生の nonce・refresh token） | クライアント | すべて信用しない。4章の検証を通ったものだけを使う |
+| nonce（方式 N） | サーバーが発行 | 次の4つを満たすもの：**サーバーが発行した**、**その利用者に結び付けた**、**期限付き**（数分）、**1回だけ使える**。サーバー側の保管（例：利用者 ID・nonce・期限の行）を `deps.consumeNonce({userId, nonce, now})` で照合し、照合した時点で消す。クライアントが作った nonce・別の利用者の nonce・期限切れ・使用済みは拒否（`apple_nonce_invalid`）。保管の仕組みは未実装（方式 N を採るときに作る） |
+
+呼び出し側（将来の Edge Function）は、サーバーが検証した本人情報と再認証の証跡だけを渡す。クライアントの自己申告
+（利用者 ID、時刻、「再認証した」という申告）はモジュールに渡さない。
+
+## 4. 結び付けと検証の流れ（両方式で共通の部分）
 
 退会の要求は `Authorization: Bearer <Supabase JWT>` で本人を特定する（既存）。Apple を使った利用者
 （`identities` に `provider: 'apple'` がある）だけ、次をすべて満たしたときに削除へ進む。どれかが満たされなければ**何も削除しない**。
 
-1. **Supabase の本人の一致**：退会する JWT の利用者と、再認証で得た利用者が同じ（方式 R：再認証後のセッションの user ID）。
-   再認証が新しいこと（JWT の認証時刻が 10 分以内）。
+1. **Supabase の本人の一致**（方式 R）：退会する利用者と、サーバーが作った再認証の証跡の利用者が同じ。証跡がない・
+   サーバーが作ったものでない・時刻が古い/未来/整数でない、のどれでも拒否。方式 N では、サーバーが発行した1回限りの nonce と、
+   検証済みの identity token の `iat`（整数・未来でない・10分以内）で新しさを確かめる。
 2. **Apple アカウントの一致**：Supabase に記録された Apple の `sub`（`provider_id` と `identity_data.sub`。食い違えば拒否）と、
    **サーバーが Apple から受け取った `id_token` の `sub`** が一致する。`id_token` は Apple の公開鍵（JWKS）で署名を確認し、
    `iss`・`aud`（= client_id）・`exp`・`iat`（新しいこと）を検証する。
@@ -54,20 +68,21 @@ Apple の鍵（.p8）や Services ID の作成、Supabase の設定、秘密情�
 
 client secret は Edge の secret（`APPLE_PRIVATE_KEY`・`APPLE_KEY_ID`、client_id）から毎回 5 分有効で作る。Team ID は `9S43D53PCM`。
 
-## 4. 下書きモジュールの関数
+## 5. 下書きモジュールの関数
 
 | 関数 | 役割 |
 |---|---|
 | `createClientSecret` | ES256 の client secret（有効 5 分） |
 | `verifyIdentityToken` | Apple の JWKS（RS256 / ES256）での署名、`iss`・`aud`・`exp`・`iat`・`nonce`・`sub` の検証 |
+| `createReauthEvidence` | サーバーが検証した再認証の JWT（利用者と claims）から証跡を作る。`amr` の oauth の時刻を使う |
 | `appleSubOf` | Supabase の利用者から Apple の `sub` を取り出す（記録が食い違えば拒否、Apple を使っていなければ null） |
-| `revokeAppleAuthorization` | 3章の 1〜5。`{ok:true, revoked:true}` / `{ok:true, skipped:'no_apple_identity'}` / `{ok:false, code}` |
+| `revokeAppleAuthorization` | 4章の 1〜5。方式 N では `deps.consumeNonce` が必須。`{ok:true, revoked:true}` / `{ok:true, skipped:'no_apple_identity'}` / `{ok:false, code}` |
 | `deleteAccountWithApple` | 取り消しが証明されたとき（または Apple 未使用のとき）だけ削除処理を呼ぶ |
 
-理由コード：`apple_reauth_required`・`reauth_too_old`・`reauth_user_mismatch`・`apple_config_missing`・`apple_proof_invalid`・
+理由コード：`apple_reauth_required`・`reauth_untrusted`・`reauth_too_old`・`reauth_user_mismatch`・`apple_nonce_invalid`・`apple_config_missing`・`apple_proof_invalid`・
 `apple_identity_mismatch`・`apple_code_rejected`・`apple_refresh_rejected`・`apple_revoke_failed`・`apple_revoke_unconfirmed`・`apple_timeout`。
 
-## 5. 隔離試験（`tests/apple-revoke.test.cjs`、14件）
+## 6. 隔離試験（`tests/apple-revoke.test.cjs`、19件）
 
 - client secret の header・claims と短い有効期限、試験用の公開鍵での署名の確認
 - 方式 N の成功：コードの交換 → 取り消し → 失効の確認 → 削除、の順で、削除は1回だけ
@@ -76,10 +91,15 @@ client secret は Edge の secret（`APPLE_PRIVATE_KEY`・`APPLE_KEY_ID`、clien
 - 削除しないこと：再認証なし、古い再認証、別の Supabase 利用者で再認証、別の Apple アカウントで再認証、
   任意の refresh token、他人の refresh token、使い回した認可コード、nonce・aud・iss・exp・iat・署名の不正、
   JWT でない文字列、取り消しが 200 でも失効していない場合、各段階のタイムアウト、サーバー設定の欠け、Apple の記録の食い違い
+- 境界（14b251b の Work 試験を含む）：方式 R で証跡がない／クライアントが送った形だけの証跡／JSON で複製した証跡、
+  再認証の時刻が未来（+120秒・+1日）・NaN・Infinity・小数・文字列・null、`amr` が古く `iat` だけ新しい、
+  claims の `sub` が別人、oauth 以外の `amr`、方式 N の nonce がクライアント製・別の利用者の・期限切れ・使用済み、
+  nonce の照合手段がない、identity token の `iat` が未来・文字列・小数・欠落、`exp` が文字列、利用者が検証済みの形でない
 - 戻り値とログにトークン・コード・nonce が出ないこと、モジュールが console・localStorage・環境変数を使わないこと
-- 変異試験：失効の確認・`sub` の一致・nonce・再認証した利用者の一致・署名の各検証を外すと、それぞれ試験が失敗する
+- 変異試験：失効の確認・`sub` の一致・nonce・再認証した利用者の一致・署名・証跡の判定・未来時刻の判定・整数の判定・
+  nonce の消費・`amr` の時刻の判定を外すと、それぞれ試験が失敗する
 
-## 6. 承認が必要な作業（順番）
+## 7. 承認が必要な作業（順番）
 
 1. staging で2章の未確認事項を確かめる（Apple の Sign in with Apple の有効化、Services ID・鍵の作成、Supabase の Apple provider 設定を含む。本人と Work）
 2. 方式の決定（方式 N ならネイティブのプラグイン追加の判断も）

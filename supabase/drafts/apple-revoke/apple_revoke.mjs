@@ -7,6 +7,13 @@
 // - The server therefore obtains an id_token from Apple itself (code or refresh grant), checks that it belongs to
 //   the deleting user's Apple identity, revokes, and then confirms the refresh grant now fails.
 // - A client-supplied identity token is only trusted after signature, iss, aud, exp, iat and nonce checks.
+//
+// Trust boundaries (see docs/apple-token-revocation-design.md):
+// - user: the deleting user as returned by the server's own admin.auth.getUser(<request JWT>). Never client JSON.
+// - reauth: evidence made only by createReauthEvidence() from a re-authentication JWT the server verified itself.
+//   Plain objects (for example a client-sent {userId, authTime}) are refused. JWT iat is not a re-authentication time.
+// - proof: everything the client sends (code, identity token, raw nonce, refresh token). Untrusted until checked here.
+// - nonce: issued by the server, bound to the user, short-lived and single-use, checked through deps.consumeNonce.
 const APPLE='https://appleid.apple.com';
 const enc=new TextEncoder();
 
@@ -31,6 +38,7 @@ async function sha256Hex(s){
 
 /* Verifies an Apple identity token against Apple's published keys and the expected identity. */
 export async function verifyIdentityToken(token,{clientId,expectedSub,nonceHash,now,maxAgeSec=600,jwks}){
+  if(!Number.isFinite(now))fail('apple_config_missing');
   const parts=typeof token==='string'?token.split('.'):[];
   if(parts.length!==3)fail('apple_proof_invalid');
   let header,claims;
@@ -45,11 +53,27 @@ export async function verifyIdentityToken(token,{clientId,expectedSub,nonceHash,
     ok=await crypto.subtle.verify(algo,key,fromB64url(parts[2]),enc.encode(parts[0]+'.'+parts[1]));
   }catch(e){ok=false;}
   const t=Math.floor(now/1000);
-  if(!ok||claims.iss!==APPLE||claims.aud!==clientId||typeof claims.exp!=='number'||claims.exp<=t||
-     typeof claims.iat!=='number'||claims.iat>t+60||t-claims.iat>maxAgeSec)fail('apple_proof_invalid');
+  if(!ok||claims.iss!==APPLE||claims.aud!==clientId||!Number.isInteger(claims.exp)||claims.exp<=t||
+     !freshTime(claims.iat,now,maxAgeSec))fail('apple_proof_invalid');
   if(nonceHash!==undefined&&claims.nonce!==nonceHash)fail('apple_proof_invalid');
   if(claims.sub!==expectedSub)fail('apple_identity_mismatch');
   return claims;
+}
+
+const evidence=new WeakSet();
+/* Re-authentication evidence from a Supabase JWT the server has already verified (admin.auth.getUser succeeded for it).
+   The time comes from the JWT's amr entry for the OAuth sign-in, not from iat (which changes on every token refresh). */
+export function createReauthEvidence({verifiedUser,verifiedClaims}){
+  if(!verifiedUser||typeof verifiedUser.id!=='string'||!verifiedClaims||verifiedClaims.sub!==verifiedUser.id)fail('reauth_untrusted');
+  const amr=Array.isArray(verifiedClaims.amr)?verifiedClaims.amr.filter(a=>a&&a.method==='oauth'):[];
+  if(amr.length!==1||!Number.isInteger(amr[0].timestamp))fail('reauth_untrusted');
+  const e=Object.freeze({userId:verifiedUser.id,authTime:amr[0].timestamp});
+  evidence.add(e);
+  return e;
+}
+function freshTime(sec,now,maxAgeSec){
+  const t=Math.floor(now/1000);
+  return Number.isInteger(sec)&&sec<=t+60&&t-sec<=maxAgeSec;   // finite, not in the future (60 s clock skew), recent
 }
 
 /* The Apple account ID recorded by Supabase for this user, or null if the user never used Apple. */
@@ -79,15 +103,26 @@ async function post(deps,path,form){
 /* Revokes the user's Apple authorization and proves it. Never returns or logs tokens or secrets.
    proof: {type:'authorization_code', code, identityToken, rawNonce} (native re-authentication) or
           {type:'refresh_token', refreshToken} (provider refresh token from a fresh Supabase re-authentication). */
-export async function revokeAppleAuthorization({user,authTime,reauthUserId,proof,config,deps}){
+export async function revokeAppleAuthorization({user,reauth,proof,config,deps}){
   try{
+    if(!user||typeof user.id!=='string')fail('reauth_untrusted');
     const sub=appleSubOf(user);
     if(!sub)return {ok:true,skipped:'no_apple_identity'};
     if(!proof||!proof.type)fail('apple_reauth_required');
-    if(reauthUserId!==undefined&&reauthUserId!==user.id)fail('reauth_user_mismatch');
-    const now=deps.now();
-    if(typeof authTime!=='number'||Math.floor(now/1000)-authTime>(config.maxReauthAgeSec||600))fail('reauth_too_old');
     if(!config||!config.teamId||!config.keyId||!config.clientId||!config.privateKey)fail('apple_config_missing');
+    const now=deps.now();
+    if(!Number.isFinite(now))fail('apple_config_missing');
+    const maxAge=config.maxReauthAgeSec||600;
+    if(proof.type==='refresh_token'){
+      // The refresh token alone does not show who re-authenticated: require server-made evidence for this user.
+      if(!reauth||!evidence.has(reauth))fail('reauth_untrusted');
+      if(reauth.userId!==user.id)fail('reauth_user_mismatch');
+      if(!freshTime(reauth.authTime,now,maxAge))fail('reauth_too_old');
+    }else if(proof.type==='authorization_code'){
+      // Native re-authentication: freshness comes from the verified identity token; the nonce must be ours and unused.
+      if(typeof deps.consumeNonce!=='function')fail('apple_config_missing');
+      if(!proof.rawNonce||!(await deps.consumeNonce({userId:user.id,nonce:proof.rawNonce,now})))fail('apple_nonce_invalid');
+    }
     const jwks=await deps.getAppleKeys();
     const secret=await createClientSecret({...config,now});
     const base={client_id:config.clientId,client_secret:secret};
@@ -95,7 +130,7 @@ export async function revokeAppleAuthorization({user,authTime,reauthUserId,proof
     if(proof.type==='authorization_code'){
       if(!proof.code||!proof.identityToken||!proof.rawNonce)fail('apple_reauth_required');
       // The device's identity token must be this user's Apple account and carry our nonce, before the code is used.
-      await verifyIdentityToken(proof.identityToken,{clientId:config.clientId,expectedSub:sub,nonceHash:await sha256Hex(proof.rawNonce),now,jwks});
+      await verifyIdentityToken(proof.identityToken,{clientId:config.clientId,expectedSub:sub,nonceHash:await sha256Hex(proof.rawNonce),now,jwks,maxAgeSec:maxAge});
       const r=await post(deps,'/auth/token',{...base,grant_type:'authorization_code',code:proof.code});
       if(r.status!==200||!r.body||!r.body.refresh_token||!r.body.id_token)fail('apple_code_rejected');
       await verifyIdentityToken(r.body.id_token,{clientId:config.clientId,expectedSub:sub,now,jwks});
