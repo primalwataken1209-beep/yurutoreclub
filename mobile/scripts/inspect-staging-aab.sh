@@ -38,7 +38,9 @@ if(!ok){console.error("AAB inspection failed: build target, ID or callback");pro
 if grep -rq "$production" "$out/assets"; then fail 'production reference in bundled assets'; fi
 grep -q "$staging" "$pub/app.bundle.js" || fail 'staging reference missing'
 grep -qF "$YT_STAGING_PUBLISHABLE_KEY" "$pub/app.bundle.js" || fail 'bundle does not carry the given staging key'
-if grep -rqE 'sb_secret_|service_role' "$out/assets"; then fail 'secret-like value in bundled assets'; fi
+# Secret-key shapes only: the vendored SDK itself mentions the word service_role in messages.
+if grep -rqE 'sb_secret_[A-Za-z0-9_-]{8,}' "$out/assets"; then fail 'secret key in bundled assets'; fi
+if grep -qE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.' "$pub/app.bundle.js" "$pub/native-config.js"; then fail 'JWT-shaped key in the app bundle'; fi
 if grep -q 'CI_COMPILE_ONLY' "$pub/app.bundle.js"; then fail 'compile-only placeholder key in bundle'; fi
 
 # 4. Record what passed.

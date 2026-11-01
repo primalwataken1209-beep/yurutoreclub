@@ -62,7 +62,7 @@ test('inspection covers signature, manifest, target, callback, key and productio
   for(const check of [/set -euo pipefail/,/grep -q 'jar is unsigned'/,/package=\\"\$app_id\\"/,/android:debuggable="true"/,
     /android:usesCleartextTraffic="true"/,/android:allowBackup="false"/,/android\.permission\.INTERNET/,
     /info\.target==="staging"/,/club\.yurutore\.app:\/\/auth\/callback/,/grep -rq "\$production"/,/grep -qF "\$YT_STAGING_PUBLISHABLE_KEY"/,
-    /sb_secret_\|service_role/,/CI_COMPILE_ONLY/,/sha256sum/])
+    /sb_secret_\[A-Za-z0-9_-\]\{8,\}/,/eyJ\[A-Za-z0-9_-\]\{10,\}/,/CI_COMPILE_ONLY/,/sha256sum/])
     assert.match(inspect,check,String(check));
   assert.doesNotMatch(inspect,/echo[^\n]*YT_STAGING_PUBLISHABLE_KEY/,'never prints the key');
 });
