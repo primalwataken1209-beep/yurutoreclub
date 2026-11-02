@@ -1,0 +1,93 @@
+# Manual only: builds an unsigned staging release AAB for later signing, and keeps it as a short-lived artifact
+# only when every inspection passes. No signing, no store upload, no secrets: the only input is the staging
+# publishable key (public by design; still masked and never printed). Target and app ID are fixed.
+# GitHub runs workflow_dispatch only for workflow files present on the default branch (see docs/android-staging-aab.md).
+name: Mobile staging AAB (manual, unsigned, short-lived artifact)
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_publishable_key:
+        description: 'Supabase staging publishable key (sb_publishable_...). Secret or service_role keys are refused.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-staging-aab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  staging-aab:
+    # Only the isolated store-preparation branch may produce a candidate.
+    if: github.ref == 'refs/heads/claude/store-release-prep'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Mask and pre-check the staging key (before any repository code runs)
+        working-directory: .
+        env:
+          KEY: ${{ inputs.staging_publishable_key }}
+        run: |
+          echo "::add-mask::$KEY"
+          case "$KEY" in *sb_secret_*|*service_role*|eyJ*) echo 'Refused: not a publishable key'; exit 1;; esac
+          [[ "$KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{10,200}$ ]] || { echo 'Refused: not a publishable key'; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check key and fixed app ID
+        env:
+          YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+        run: |
+          node scripts/check-staging-key.cjs
+          node -e "const c=require('./capacitor.config.json');if(c.appId!=='club.yurutore.app'){console.error('appId must be club.yurutore.app');process.exit(1)}"
+      - name: Build the staging bundle (target fixed to staging)
+        env:
+          YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+        run: node scripts/build-mobile.cjs --target=staging
+      - run: npx cap sync android
+      - name: Verify the committed Gradle wrapper against the official checksum
+        run: |
+          echo "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+          grep -q '^distributionSha256Sum=' android/gradle/wrapper/gradle-wrapper.properties
+          if grep -Eq 'signingConfigs|storeFile' android/app/build.gradle; then exit 1; fi
+      - name: Assemble the release AAB without any signing config
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon bundleRelease
+      - name: Inspect the AAB (unsigned, approved ID, staging only, given key)
+        env:
+          YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+          BUNDLETOOL_SHA256: a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo "$BUNDLETOOL_SHA256  $RUNNER_TEMP/bundletool.jar" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/candidate"
+          cp android/app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/candidate/"
+          bash scripts/inspect-staging-aab.sh "$RUNNER_TEMP/candidate/app-release.aab" "$RUNNER_TEMP/bundletool.jar" "$RUNNER_TEMP/candidate"
+          cat "$RUNNER_TEMP/candidate/app-release.aab.sha256"
+      # Reached only when every step above passed.
+      - name: Keep the inspected candidate for 3 days
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-aab-unsigned-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/candidate/app-release.aab
+            ${{ runner.temp }}/candidate/app-release.aab.sha256
+            ${{ runner.temp }}/candidate/build-info.json
+          retention-days: 3
+          if-no-files-found: error
