@@ -3,9 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const {checkStagingKey}=require('../scripts/check-staging-key.cjs');
 const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
-const raw=fs.readFileSync(path.join(root,'.github','workflows','mobile-staging-aab.yml'),'utf8');
+const raw=fs.readFileSync(path.join(root,'.github','workflows','mobile-staging-aab.yml'),'utf8').replace(/\r\n/g,'\n');
 const yml=raw.replace(/^\s*#.*$/gm,'');
-const inspect=fs.readFileSync(path.join(mobile,'scripts','inspect-staging-aab.sh'),'utf8');
+const inspect=fs.readFileSync(path.join(mobile,'scripts','inspect-staging-aab.sh'),'utf8').replace(/\r\n/g,'\n');
 
 test('only a publishable key is accepted; secret, service_role and JWT keys are refused',()=>{
   assert.equal(checkStagingKey('sb_publishable_TESTONLY_not_a_real_key'),null);

@@ -30,7 +30,7 @@ const CDN_TAGS=[
 ];
 const LEGAL_PAGES=['privacy','terms','community-guidelines','contact','account-deletion'];
 
-const compile=code=>babel.transformSync(code,{babelrc:false,configFile:false,presets:['@babel/preset-react'],comments:false}).code;
+const compile=code=>babel.transformSync(code,{babelrc:false,configFile:false,presets:['@babel/preset-react'],comments:false,compact:false}).code;   // same output above Babel's 500 KB auto-compact size
 function once(text,from,to,label,count=1){
   const n=text.split(from).length-1;
   if(n!==count)throw Error('Source anchor changed ('+label+'): found '+n);

@@ -118,7 +118,7 @@ test('native projects use the approved id and callback scheme, with no signing s
     assert.match(read(f.startsWith('android')?'android/.gitignore':'ios/.gitignore'),new RegExp('^'+f.replace(/^(android|ios)\//,'').replace(/\//g,'\\/')+'$','m'),f+' must stay untracked');
 });
 test('compile CI is read-only, SHA-pinned, secret-free and unsigned',()=>{
-  const yml=fs.readFileSync(path.join(root,'.github','workflows','mobile-compile.yml'),'utf8').replace(/^\s*#.*$/gm,'');
+  const yml=fs.readFileSync(path.join(root,'.github','workflows','mobile-compile.yml'),'utf8').replace(/\r\n/g,'\n').replace(/^\s*#.*$/gm,'');
   assert.match(yml,/^permissions:\n  contents: read\n/m);
   assert.doesNotMatch(yml,/secrets\.|pull_request_target|write-all|id-token|upload-artifact|deploy/i);
   const uses=[...yml.matchAll(/uses: (\S+)/g)].map(m=>m[1]);

@@ -2279,7 +2279,7 @@ ja:{
     setSound:'効果音', setSoundSub:'タップ時の小さな音',
     setNight:'夜間モード', setNightSub:'18時〜6時に部屋が夜になるよ',
     setAuto:'自動', setBright:'常に明るい', setNote:'設定はこの端末に保存されるよ',
-    gotItem:'をゲット！', gotItemSub:'パンダルームに{name}が増えたよ', future:'これから(将来のたのしみ)',
+    gotItem:'をゲット！', gotItemSub:'パンダルームに{name}が増えたよ', future:'これから(将来のたのしみ)', waiting:'条件クリア！家具は1日1個ずつ届くよ',
     errTitle:'ごめんね〜、お部屋がちょっと休憩中みたい', errSub:'もう一度開いてみてね', errHome:'ホームへ戻る',
     unlocked:'個 解放', missionDoneToday:'今日は達成済み！えらい〜🐼✨', missionDoBtn:'できた！（達成する）',
     missionFromHome:'ホーム画面から達成できるよ🐼', missionTotal:'いままでの達成：{n}回',
@@ -2564,7 +2564,7 @@ en:{
     setSound:'Sound', setSoundSub:'A small sound when you tap',
     setNight:'Night mode', setNightSub:'The room turns to evening from 6pm to 6am',
     setAuto:'Auto', setBright:'Always bright', setNote:'Settings are saved on this device',
-    gotItem:' arrived!', gotItemSub:'{name} is in the Panda Room now', future:'Coming later',
+    gotItem:' arrived!', gotItemSub:'{name} is in the Panda Room now', future:'Coming later', waiting:'Unlocked! New furniture arrives one piece a day',
     errTitle:'Sorry, the room is taking a little break', errSub:'Try opening it once more', errHome:'Back to home',
     unlocked:'unlocked', missionDoneToday:'Already done today. Lovely 🐼✨', missionDoBtn:'Done!',
     missionFromHome:'You can finish this from the home screen 🐼', missionTotal:'Finished so far: {n}',
@@ -5712,6 +5712,12 @@ function AppLogic({devId}){
     if(st)saveSt(devId,userId,{...st,auth:userId});
   },[st,devId,session?.user?.id]);
 
+  // 【家具1日1個】状態が変わるたびに獲得を確定(持ち主一致時のみ)
+  useEffect(()=>{
+    const userId=session?.user?.id||'guest';
+    if(st&&authChecked&&st.auth===userId)room30Furniture(st,calcStreak(st.reports||[]),true);
+  },[st,authChecked,session?.user?.id]);
+
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
 
   if(passwordRecovery)return <PasswordRecoveryScreen session={session?.user?.id===recoveryUserId?session:null} onDone={()=>{ytRecoveryRemember(null);setPasswordRecovery(false);}}/>;
@@ -8187,7 +8193,8 @@ function migrateUnlockIds(uid){
    src: assets/panda-room/v30/ 内のファイル名。素材未着の家具はsrcのままでよい。
    読み込み失敗時はそのレイヤーだけ非表示(部屋は壊れない)。
    unlock: (st,ps,extra)=>bool。st=roomStats, ps=pandaStats。'future'=条件は将来確定(一覧に「これから」表示) */
-function room30Items(state,streak){
+/* 【家具1日1個】ok=条件達成のみ。獲得済みは room30Furniture */
+function room30Eligibility(state,streak){
   const st=roomStats(state,streak);
   const ps=loadPandaStats(state&&state.auth);
   const month=new Date().getMonth()+1;
@@ -8232,17 +8239,43 @@ function room30Items(state,streak){
     {id:'panda_plush',icon:'🧸',name:'パンダのぬいぐるみ',name_en:'Panda plushie',src:'f39_panda_plush.webp',z:28,cond:'記録50回',memory:'ずっと一緒にいた証だよ',cond_en:"50 logs",memory_en:"Proof we have been together all along",hs:{l:3.0,t:60.77,w:5.5,h:8.73},ok:st.total>=50},
     {id:'wall_garland',icon:'🎀',name:'お祝いガーランド',name_en:'Party garland',src:'f39_wall_garland.webp',z:1,cond:'記録100回',memory:'100回。もう立派な習慣だね🎉',cond_en:"100 logs",memory_en:"One hundred. A proper habit now 🎉",hs:{l:24.0,t:0.55,w:22.0,h:10.45},ok:st.total>=100}
   ];
-  // 成長家具の解放数(基本3点を除く)→ storagebox判定
-  const grown=L.filter(i=>!i.always&&i.ok).length;
-  const sb=L.find(i=>i.id==='storagebox'); sb.ok=grown>=5;
-  // 一度でも達成した家具は永続化(everOk)
-  try{
-    const memo=loadRoomUnlockMemo(state&&state.auth);
-    if(memo&&memo.everOk&&memo.everOk.length){
-      for(const it of L){ if(memo.everOk.indexOf(it.id)>=0)it.ok=true; }
-    }
-  }catch(e){}
   return L;
+}
+/* 【家具1日1個】新規獲得は1日1個・獲得済みは保持・commit時だけ保存(仕様はtests/furniture-daily-cap.test.cjs) */
+function furnDayNum(ts){const d=new Date(ts);return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
+function room30Furniture(state,streak,commit){
+  const L=room30Eligibility(state,streak);
+  const uid=state&&state.auth;
+  const grown=L.filter(i=>!i.always);
+  const sb=L.find(i=>i.id==='storagebox');
+  let memo=null,changed=false;
+  try{memo=loadRoomUnlockMemo(uid);}catch(e){memo=null;}
+  if(!memo||!Array.isArray(memo.owned)){
+    const legacy={};
+    ((memo&&memo.everOk)||[]).forEach(id=>{legacy[ROOM30_ID_MIGRATE[id]||id]=true;});
+    sb.ok=grown.filter(i=>i.id!=='storagebox'&&i.ok).length>=5;   // 旧判定
+    grown.forEach(i=>{if(i.ok)legacy[i.id]=true;});
+    const owned=grown.filter(i=>legacy[i.id]).map(i=>({id:i.id,day:0}));
+    memo={seen:memo?memo.seen:owned.map(o=>o.id),everOk:(memo?memo.everOk:[]).slice(),owned,lastGrantDay:0};
+    changed=true;
+  }
+  const has={};memo.owned.forEach(o=>{has[o.id]=true;});
+  sb.ok=grown.filter(i=>i.id!=='storagebox'&&has[i.id]).length>=5;   // 獲得済み5点
+  const today=furnDayNum(Date.now());
+  const last=Number(memo.lastGrantDay)||0;
+  if(today>last&&!memo.owned.some(o=>o.day===today)){
+    const pick=grown.find(i=>i.ok&&!i.future&&!has[i.id]);
+    if(pick){memo.owned.push({id:pick.id,day:today});memo.lastGrantDay=today;has[pick.id]=true;changed=true;}
+  }
+  for(const id in has)if(memo.everOk.indexOf(id)<0){memo.everOk.push(id);changed=true;}
+  if(commit&&changed)saveRoomUnlockMemo(uid,memo);
+  return L.map(i=>{
+    const owned=!!(i.always||has[i.id]);
+    return {...i,ok:owned,waiting:!owned&&!!i.ok&&!i.future};
+  });
+}
+function room30Items(state,streak){
+  return room30Furniture(state,streak,false);
 }
 /* 思い出コレクション(部屋には出ない・一覧のみ。旧v29項目の互換) */
 function room30Memories(state,streak){
@@ -9683,6 +9716,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
   useEffect(()=>{
     try{
       const uid=state&&state.auth;
+      room30Furniture(state,streak,true);
       let memo=loadRoomUnlockMemo(uid);
       if(!memo){
         saveRoomUnlockMemo(uid,{seen:okIds.slice(),everOk:okIds.slice()});
@@ -10166,7 +10200,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
               <div key={it.id} className={'items30-row'+(it.ok?' ok':'')}>
                 <span className="i30-ic">{it.ok?it.icon:'🔒'}</span>
                 <span className="i30-name">{tl(it,'name')}</span>
-                <span className="i30-sub">{it.ok?tl(it,'memory'):(it.future?t('room.future'):tl(it,'cond'))}</span>
+                <span className="i30-sub">{it.ok?tl(it,'memory'):(it.future?t('room.future'):(it.waiting?t('room.waiting'):tl(it,'cond')))}</span>
               </div>
             ))}
           </div>
