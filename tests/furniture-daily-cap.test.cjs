@@ -179,6 +179,57 @@ test('a stale saved day and a same-day restart give exactly one piece for today'
   const c=setup(t,{stored:b.snapshot(),now:D2+7200000});c.commit(state(app(20,D1)));
   assert.deepEqual(c.ownedIds(),['plant_large','cushion'],'no second piece after another restart');
 });
+test('Work review addendum: seen and everOk written by the room survive the next day\'s grant',async t=>{
+  const s=setup(t);s.commit(state([]));const st=state(app(20,D1));s.commit(st);
+  const m=s.memo();m.seen.push('plant_large');m.everOk.push('crown');s.w.saveRoomUnlockMemo('guest',m);  // closing the modal, a memory
+  s.clock.now=D2;s.commit(st);
+  assert.ok(s.memo().seen.includes('plant_large'),'acknowledged piece stays seen');
+  assert.ok(!s.memo().seen.includes('cushion'),'the new piece is still to be shown');
+  assert.ok(s.memo().everOk.includes('crown'),'non-furniture entries survive');
+  assert.deepEqual(s.ownedIds(),['plant_large','cushion']);
+});
+test('while saves fail, entries the room managed to save are merged, not overwritten',async t=>{
+  const s=setup(t);s.commit(state([]));const st=state(app(20,D1));s.commit(st);
+  const restore=failSaves(s);s.clock.now=D2;s.commit(st);   // today's grant cannot be saved
+  restore();
+  const m=s.memo();m.seen.push('plant_large');m.everOk.push('crown');s.w.saveRoomUnlockMemo('guest',m);
+  s.commit(st);
+  const after=s.memo();
+  assert.ok(after.seen.includes('plant_large')&&after.everOk.includes('crown'));
+  assert.deepEqual(plain(after.owned.map(o=>o.id)),['plant_large','cushion'],'today\'s one piece once saving works');
+});
+/* The home room and the full room each keep an unlock queue, so a piece can be announced once per room view.
+   That duplication already exists in 5289aba (it announced 5 dialogs for 3 pieces); this test checks which pieces
+   are announced and that seen survives the next day's grant. */
+test('closing the unlock modal in the room, then the next day\'s piece: only the new piece is announced, seen kept',async t=>{
+  const s=setup(t);const w=s.w;const settle=()=>new Promise(r=>setTimeout(r,150));await settle();
+  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.replace(/\s+/g,'').includes(label.replace(/\s+/g,'')));
+  const click=async label=>{const b=button(label);assert.ok(b,'button '+label);b.click();await settle();};
+  const fill=(sel,v)=>{const el=w.document.querySelector(sel);Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value').set.call(el,v);el.dispatchEvent(new w.Event('input',{bubbles:true}));};
+  const record=async()=>{s.clock.now+=60000;w.document.querySelector('.fab').click();await settle();await click('ウォーキング');await click('報告する ✓');
+    w.document.querySelector('.pj-stage').click();await settle();await click('ホームへ戻る');};
+  const names={plant_large:'観葉植物(大)',cushion:'ドット柄クッション',pawmat:'肉球ラグ'};
+  // Closes every unlock dialog on screen and returns which pieces they announced.
+  const closeAll=async()=>{const seen=new Set();for(let i=0;i<10;i++){const b=w.document.querySelector('.room-modal-btn');if(!b)break;
+    const text=b.closest('[role=dialog]').textContent;for(const [id,n] of Object.entries(names))if(text.includes(n))seen.add(id);
+    assert.doesNotMatch(text,/まるいラグ|ローテーブル|まるい座布団/,'pieces present from the start are not announced');b.click();await settle();}
+    return [...seen].sort();};
+  await click('まずは体験してみる');await click('まずは体験してみる');
+  await click('🚶 ウォーキング');await click('週1〜2回');await click('次へ進む');
+  fill('input[placeholder="例：ゆるパンダ"]','演出テスト');await click('はじめる');
+  for(let i=0;i<3;i++)await record();                                   // day 1: three records, one piece
+  const day1=await closeAll();await click('お部屋に遊びに行く');day1.push(...await closeAll());
+  assert.deepEqual([...new Set(day1)],['plant_large'],'day 1 announces only the first piece');
+  assert.ok(s.memo().seen.includes('plant_large'));
+  await click('ホームへ戻る');await closeAll();
+  s.clock.now=D2;await record();                                        // day 2: the next waiting piece
+  assert.ok(s.memo().seen.includes('plant_large'),'seen kept after the next day\'s grant');
+  const day2=await closeAll();await click('お部屋に遊びに行く');day2.push(...await closeAll());
+  assert.deepEqual([...new Set(day2)],['cushion'],'day 2 announces only the new piece');
+  const after=s.memo();
+  assert.ok(after.seen.includes('plant_large')&&after.seen.includes('cushion'));
+  assert.deepEqual(s.ownedIds(),['plant_large','cushion']);assert.deepEqual(s.errors,[]);
+});
 test('starting a fresh trial clears the furniture kept for the previous trial in this session',async t=>{
   const s=setup(t);s.commit(state([]));s.commit(state(app(3,D1)));
   assert.deepEqual(shown(s,state(app(3,D1))),['plant_large']);

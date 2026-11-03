@@ -8215,7 +8215,8 @@ function room30Eligibility(state,streak){
   return L;
 }
 /* 【家具1日1個】新規獲得は1日1個・獲得済みは保持(仕様はtests/furniture-daily-cap.test.cjs)。
-   移行は印(fc)のない旧記録だけ。保存できない間は新しい家具を渡さず、セッション内の状態はFURN_CACHEに残す */
+   移行は印(fc)のない旧記録だけ。保存できない間は新しい家具を渡さず、セッション内の状態はFURN_CACHEに残す。
+   保存済みの記録を優先し、FURN_CACHEは保存失敗中だけ使う(保存済みのseen/everOk/ownedは合流させる) */
 const FURN_CACHE={};
 function furnDayNum(ts){const d=new Date(ts);return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
 function room30Furniture(state,streak,commit){
@@ -8224,7 +8225,15 @@ function room30Furniture(state,streak,commit){
   const grown=L.filter(i=>!i.always);
   const sb=L.find(i=>i.id==='storagebox');
   let memo=null,changed=false;
-  if(c)memo=JSON.parse(JSON.stringify(c.memo));else try{memo=loadRoomUnlockMemo(uid);}catch(e){memo=null;}
+  let saved=null;try{saved=loadRoomUnlockMemo(uid);}catch(e){}
+  if(c&&(c.failed||!saved)){
+    memo=JSON.parse(JSON.stringify(c.memo));
+    if(saved){
+      for(const f of ['seen','everOk'])(saved[f]||[]).forEach(id=>{if(memo[f].indexOf(id)<0)memo[f].push(id);});
+      if(Array.isArray(saved.owned))saved.owned.forEach(o=>{if(!memo.owned.some(x=>x.id===o.id))memo.owned.push(o);});
+      memo.lastGrantDay=Math.max(Number(memo.lastGrantDay)||0,Number(saved.lastGrantDay)||0);
+    }
+  }else memo=saved;
   if(!memo||!Array.isArray(memo.owned)){
     const legacy={},old=(state.reports||[]).filter(r=>!r.fc);
     ((memo&&memo.everOk)||[]).forEach(id=>{legacy[ROOM30_ID_MIGRATE[id]||id]=true;});
@@ -8234,7 +8243,7 @@ function room30Furniture(state,streak,commit){
       E.forEach(i=>{if(i.ok)legacy[i.id]=true;});
     }
     const owned=grown.filter(i=>legacy[i.id]).map(i=>({id:i.id,day:0}));
-    memo={seen:memo?memo.seen:owned.map(o=>o.id),everOk:(memo?memo.everOk:[]).slice(),owned,lastGrantDay:0};
+    memo={seen:memo?memo.seen:L.filter(i=>i.always).map(i=>i.id).concat(owned.map(o=>o.id)),everOk:(memo?memo.everOk:[]).slice(),owned,lastGrantDay:0};
     changed=true;
   }
   for(const o of memo.owned)if(memo.everOk.indexOf(o.id)<0){memo.everOk.push(o.id);changed=true;}
