@@ -119,16 +119,72 @@ test('accounts and the trial keep separate furniture and separate daily caps',as
   assert.deepEqual(s.ownedIds('guest'),['plant_large']);assert.deepEqual(s.ownedIds('user-a'),['plant_large']);
   assert.deepEqual(s.ownedIds('user-b'),[]);
 });
-test('a failed save is not counted: the same piece is offered again and still at most one per day',async t=>{
-  const s=setup(t);s.commit(state([]));
-  const orig=s.w.Storage.prototype.setItem;
+/* Save failures (Work review furniture-work-review-20261103.txt). While the furniture memo cannot be saved, no new
+   piece is shown or counted; records still save. The session keeps what it knows, so failures never re-run the
+   migration. Records made by this version carry fc:1 and never count as legacy. When saving works again, that
+   day's one piece arrives. */
+const failSaves=s=>{const orig=s.w.Storage.prototype.setItem;
   s.w.Storage.prototype.setItem=function(k,v){if(String(k).startsWith('yurutore_room_seen_unlocks_v1_'))throw new Error('quota');return orig.call(this,k,v);};
-  const st=state(many(20,D1));
+  return ()=>{s.w.Storage.prototype.setItem=orig;};};
+const shown=(s,st)=>plain(s.w.room30Items(st,0).filter(i=>i.ok&&!i.always).map(i=>i.id));
+const app=(n,ts)=>many(n,ts).map(r=>({...r,fc:1}));   // records made by this version
+test('a failed save is not counted: nothing new is shown while saving fails, one piece once it works',async t=>{
+  const s=setup(t);s.commit(state([]));
+  const restore=failSaves(s);
+  const st=state(app(20,D1));
   s.commit(st);s.commit(st);
   assert.deepEqual(s.ownedIds(),[],'nothing was stored');
-  assert.deepEqual(plain(s.w.room30Items(st,0).filter(i=>i.ok&&!i.always).map(i=>i.id)),['plant_large'],'display offers the same single piece');
-  s.w.Storage.prototype.setItem=orig;s.commit(st);
-  assert.deepEqual(s.ownedIds(),['plant_large']);
+  assert.deepEqual(shown(s,st),[],'nothing new is shown while the save fails');
+  restore();s.commit(st);
+  assert.deepEqual(s.ownedIds(),['plant_large']);assert.deepEqual(shown(s,st),['plant_large']);
+});
+test('Work review: a failed FIRST save does not turn later earnings into legacy furniture (same session)',async t=>{
+  const s=setup(t);failSaves(s);
+  s.commit(state([]));
+  for(const st of [state(many(20,D1)),state(app(20,D1))]){
+    s.commit(st);s.commit(st);
+    assert.ok(shown(s,st).length<=1,'cap exceeded: '+shown(s,st).join(','));
+    assert.deepEqual(shown(s,st),[]);
+  }
+});
+test('Work review: after a restart with saves still failing, records made by this version are not legacy',async t=>{
+  const a=setup(t);failSaves(a);a.commit(state([]));a.commit(state(app(20,D1)));
+  const b=setup(t,{stored:a.snapshot(),now:D1+3600000});   // memo was never stored
+  const restore=failSaves(b);
+  const st=state(app(25,D1));
+  b.commit(st);assert.deepEqual(shown(b,st),[],'no migration from records made by this version');
+  restore();b.commit(st);
+  assert.deepEqual(b.ownedIds(),['plant_large'],'one piece once saving works');
+});
+test('Work review: a legacy user whose saves fail keeps what the old version showed, and gains nothing more',async t=>{
+  const s=setup(t);const restore=failSaves(s);
+  const legacy=many(12,D1-20*DAY);
+  const old=plain(s.w.room30Eligibility(state(legacy),0).filter(i=>i.ok&&!i.always&&i.id!=='storagebox').map(i=>i.id));
+  s.commit(state(legacy));
+  assert.deepEqual(shown(s,state(legacy)).filter(id=>id!=='storagebox'),old,'old display kept');
+  const more=state([...legacy,...app(30,D1)]);
+  for(let i=0;i<5;i++)s.commit(more);
+  const kept=shown(s,state(legacy));
+  assert.deepEqual(shown(s,more),kept,'new records add nothing while saves fail');
+  restore();s.commit(more);
+  assert.equal(s.ownedIds().length,kept.length+1,'legacy set plus one piece for today');
+  for(const id of kept)assert.ok(s.ownedIds().includes(id),'kept '+id);
+});
+test('a stale saved day and a same-day restart give exactly one piece for today',async t=>{
+  const s=setup(t);s.commit(state([]));s.commit(state(app(20,D1)));
+  s.clock.now=D2;const restore=failSaves(s);s.commit(state(app(20,D1)));restore();
+  const b=setup(t,{stored:s.snapshot(),now:D2+3600000});   // stored lastGrantDay is still yesterday
+  b.commit(state(app(20,D1)));b.commit(state(app(20,D1)));
+  assert.deepEqual(b.ownedIds(),['plant_large','cushion']);
+  const c=setup(t,{stored:b.snapshot(),now:D2+7200000});c.commit(state(app(20,D1)));
+  assert.deepEqual(c.ownedIds(),['plant_large','cushion'],'no second piece after another restart');
+});
+test('starting a fresh trial clears the furniture kept for the previous trial in this session',async t=>{
+  const s=setup(t);s.commit(state([]));s.commit(state(app(3,D1)));
+  assert.deepEqual(shown(s,state(app(3,D1))),['plant_large']);
+  s.w.ytResetGuestRoomIfFresh(state([]));
+  s.commit(state([]));
+  assert.deepEqual(shown(s,state([])),[]);assert.deepEqual(s.ownedIds(),[]);
 });
 test('the storage box needs five owned pieces, not five eligible ones',async t=>{
   const s=setup(t);s.commit(state([]));
@@ -164,7 +220,9 @@ test('the praise screen announces new furniture only once on a day with several 
   assert.equal(announced.filter(Boolean).length,1,JSON.stringify(announced));
   assert.match(announced[0],/観葉植物\(大\)/);
   const key=Object.keys(w.localStorage).find(k=>k.startsWith('yurutore-v6-')&&k.endsWith('-guest'));
-  assert.equal(JSON.parse(w.localStorage.getItem(key)).reports.length,4,'all four records kept');
+  const saved=JSON.parse(w.localStorage.getItem(key)).reports;
+  assert.equal(saved.length,4,'all four records kept');
+  assert.ok(saved.every(r=>r.fc===1),'records made by this version are marked and never count as legacy');
   assert.deepEqual(s.ownedIds(),['plant_large'],'stored state matches what was announced');
   assert.deepEqual(s.errors,[]);
 });

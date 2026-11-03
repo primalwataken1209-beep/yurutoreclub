@@ -5408,7 +5408,7 @@ function ytClearLocalDataForUser(uid){
     'yurutore_room_talklog_v1',    // 旧・共通の会話ログ（v51.4.5以降は読み込まない。退会時は従来どおり削除）
     'yurutore_room_talklog_v1_'+id // 【v51.4.5】退会した本人の会話ログ（ユーザー別キー）
   ];
-  keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+  keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });delete FURN_CACHE[id];
   try{ if(window.storage&&window.storage.remove){
     window.storage.remove('yurutore-v6-ios-'+id);
     window.storage.remove('yurutore-v6-android-'+id);
@@ -5423,7 +5423,7 @@ function ytResetGuestRoomIfFresh(s){
     const x=s||{};
     const empty=v=>!v||(Array.isArray(v)?v.length===0:Object.keys(v).length===0);
     if(!(empty(x.reports)&&empty(x.completedMissions)&&empty(x.missionHistory)&&!(x.pandaPoints>0)&&empty(x.pandaChats)&&empty(x.timeCapsules)))return;
-    localStorage.removeItem(roomUnlockKey('guest'));
+    localStorage.removeItem(roomUnlockKey('guest'));delete FURN_CACHE.guest;
     localStorage.removeItem(pandaStatsKey('guest'));
     localStorage.removeItem(roomTalkLogKey('guest')); // 【v51.4.5】前回の体験版の会話ログも片付ける
   }catch(e){}
@@ -6041,7 +6041,7 @@ function AppLogic({devId}){
 
   const submitRep=async({aid,note,photo})=>{
     const ts=Date.now();
-    const nr={id:'r'+ts,aid,note,photo:photo||null,ts};
+    const nr={id:'r'+ts,aid,note,photo:photo||null,ts,fc:1};
     const nrs=[...st.reports,nr];
     const isFirst=st.reports.length===0;
     const lastTs=st.reports.length?st.reports[st.reports.length-1].ts:ts;
@@ -7456,33 +7456,6 @@ function roomStats(state,streak){
   const pandaPoints=pandaPointCount(state);
   return {total:reports.length,foodCount,walkCount,gymCount,photoCount,ramenReaction,nightCount,morningCount,stretchCount,streak,chatCount,missionDone,pandaPoints};
 }
-function pandaRoomItems(state,streak){
-  const st=roomStats(state,streak);
-  const list=[
-    {id:'plant',icon:'🪴',name:'観葉植物',name_en:'Houseplant',desc:'運動を1回記録',desc_en:"Log one workout",ok:st.total>=1,place:'右奥'},
-    {id:'cushion',icon:'🟡',name:'もちもちクッション',name_en:'Squishy cushion',desc:'3日分の記録',desc_en:"3 logs",ok:st.total>=3,place:'ラグの上'},
-    {id:'chat',icon:'💬',name:'会話クッション',name_en:'Chat cushion',desc:'パンダと1回会話',desc_en:"Chat with Panjiro once",ok:st.chatCount>=1,place:'ソファ横'},
-    {id:'timecapsule',icon:'📮',name:'未来ポスト',name_en:'Future post box',desc:'タイムカプセルを1通保存',desc_en:"Save one time capsule",ok:(state.timeCapsules||[]).length>=1,place:'窓の下'},
-    {id:'ramen',icon:'🍜',name:'ラーメン棚',name_en:'Ramen shelf',desc:'飯テロ投稿・食べ物メモ1回',desc_en:"One food note or reaction",ok:st.foodCount>=1||st.ramenReaction>=1,place:'右の棚'},
-    {id:'lamp',icon:'🌙',name:'夜ふかしランプ',name_en:'Late-night lamp',desc:'夜の記録1回',desc_en:"One evening log",ok:st.nightCount>=1,place:'左の床'},
-    {id:'photo',icon:'🖼️',name:'思い出フォト',name_en:'Memory photo',desc:'写真つき記録1回',desc_en:"One log with a photo",ok:st.photoCount>=1,place:'壁'},
-    {id:'mat',icon:'🚶',name:'さんぽマット',name_en:'Walking mat',desc:'ウォーキング/ラン1回',desc_en:"One walk or run",ok:st.walkCount>=1,place:'中央床'},
-    {id:'dumbbell',icon:'🏋️',name:'ちょいトレ道具',name_en:'Little workout kit',desc:'ジム/筋トレ/ストレッチ1回',desc_en:"One gym, strength or stretch",ok:st.gymCount>=1,place:'右床'},
-    {id:'missionPlant',icon:'🌱',name:'ミッション若葉',name_en:'Mission sprout',desc:'ゆるミッション5回達成',desc_en:"5 missions done",ok:st.missionDone>=5,place:'左奥'},
-    {id:'sofa',icon:'🛋️',name:'ふわふわソファ',name_en:'Fluffy sofa',desc:'ゆるミッション30回達成',desc_en:"30 missions done",ok:st.missionDone>=30,place:'奥の壁'},
-    {id:'neon',icon:'💗',name:'ネオン看板',name_en:'Neon sign',desc:'パンダポイント100pt',desc_en:"100 panda points",ok:st.pandaPoints>=100,place:'壁'}, /* 【v29変更】旧pointStar。描かれている素材に合わせて改名 */
-    {id:'crown',icon:'👑',name:'常連の王冠',name_en:'A regulars crown',desc:'7日継続',desc_en:"7 days in a row",ok:st.streak>=7,place:'パンダの頭上'}
-  ];
-  /* 【v29新規追加】一度でも達成した家具は永続的に解放(没収なし)。
-     とくにcrownは従来streakが切れると消えていたため、everOkで保持する。 */
-  try{
-    const memo=loadRoomUnlockMemo(state&&state.auth);
-    if(memo&&memo.everOk&&memo.everOk.length){
-      for(const it of list){ if(memo.everOk.indexOf(it.id)>=0)it.ok=true; }
-    }
-  }catch(e){}
-  return list;
-}
 function roomSeasonIcon(){
   const m=new Date().getMonth()+1;
   if([3,4,5].includes(m))return '🌸';
@@ -7933,7 +7906,7 @@ function loadRoomUnlockMemo(uid){
   return null; // 初回(未初期化)
 }
 function saveRoomUnlockMemo(uid,m){
-  try{localStorage.setItem(roomUnlockKey(uid),JSON.stringify(m));}catch(e){}
+  try{localStorage.setItem(roomUnlockKey(uid),JSON.stringify(m));return true;}catch(e){return false;}
 }
 
 /* ═══════════════ 【v30新規追加】はじまりの部屋 ═══════════════
@@ -8241,34 +8214,43 @@ function room30Eligibility(state,streak){
   ];
   return L;
 }
-/* 【家具1日1個】新規獲得は1日1個・獲得済みは保持・commit時だけ保存(仕様はtests/furniture-daily-cap.test.cjs) */
+/* 【家具1日1個】新規獲得は1日1個・獲得済みは保持(仕様はtests/furniture-daily-cap.test.cjs)。
+   移行は印(fc)のない旧記録だけ。保存できない間は新しい家具を渡さず、セッション内の状態はFURN_CACHEに残す */
+const FURN_CACHE={};
 function furnDayNum(ts){const d=new Date(ts);return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
 function room30Furniture(state,streak,commit){
   const L=room30Eligibility(state,streak);
-  const uid=state&&state.auth;
+  const uid=state&&state.auth,key=uid||'guest',c=FURN_CACHE[key];
   const grown=L.filter(i=>!i.always);
   const sb=L.find(i=>i.id==='storagebox');
   let memo=null,changed=false;
-  try{memo=loadRoomUnlockMemo(uid);}catch(e){memo=null;}
+  if(c)memo=JSON.parse(JSON.stringify(c.memo));else try{memo=loadRoomUnlockMemo(uid);}catch(e){memo=null;}
   if(!memo||!Array.isArray(memo.owned)){
-    const legacy={};
+    const legacy={},old=(state.reports||[]).filter(r=>!r.fc);
     ((memo&&memo.everOk)||[]).forEach(id=>{legacy[ROOM30_ID_MIGRATE[id]||id]=true;});
-    sb.ok=grown.filter(i=>i.id!=='storagebox'&&i.ok).length>=5;   // 旧判定
-    grown.forEach(i=>{if(i.ok)legacy[i.id]=true;});
+    if(memo||old.length){
+      const E=room30Eligibility({...state,reports:old},calcStreak(old)).filter(i=>!i.always);
+      const esb=E.find(i=>i.id==='storagebox');esb.ok=E.filter(i=>i.id!=='storagebox'&&i.ok).length>=5;
+      E.forEach(i=>{if(i.ok)legacy[i.id]=true;});
+    }
     const owned=grown.filter(i=>legacy[i.id]).map(i=>({id:i.id,day:0}));
     memo={seen:memo?memo.seen:owned.map(o=>o.id),everOk:(memo?memo.everOk:[]).slice(),owned,lastGrantDay:0};
     changed=true;
   }
+  for(const o of memo.owned)if(memo.everOk.indexOf(o.id)<0){memo.everOk.push(o.id);changed=true;}
+  const base=JSON.parse(JSON.stringify(memo));
   const has={};memo.owned.forEach(o=>{has[o.id]=true;});
   sb.ok=grown.filter(i=>i.id!=='storagebox'&&has[i.id]).length>=5;   // 獲得済み5点
   const today=furnDayNum(Date.now());
   const last=Number(memo.lastGrantDay)||0;
-  if(today>last&&!memo.owned.some(o=>o.day===today)){
+  if((commit||!(c&&c.failed))&&today>last&&!memo.owned.some(o=>o.day===today)){
     const pick=grown.find(i=>i.ok&&!i.future&&!has[i.id]);
-    if(pick){memo.owned.push({id:pick.id,day:today});memo.lastGrantDay=today;has[pick.id]=true;changed=true;}
+    if(pick){memo.owned.push({id:pick.id,day:today});memo.everOk.push(pick.id);memo.lastGrantDay=today;has[pick.id]=true;changed=true;}
   }
-  for(const id in has)if(memo.everOk.indexOf(id)<0){memo.everOk.push(id);changed=true;}
-  if(commit&&changed)saveRoomUnlockMemo(uid,memo);
+  if(commit&&(changed||(c&&c.failed))){
+    if(saveRoomUnlockMemo(uid,memo))FURN_CACHE[key]={memo};
+    else{FURN_CACHE[key]={memo:base,failed:true};memo=base;for(const k in has)delete has[k];base.owned.forEach(o=>{has[o.id]=true;});}
+  }
   return L.map(i=>{
     const owned=!!(i.always||has[i.id]);
     return {...i,ok:owned,waiting:!owned&&!!i.ok&&!i.future};
