@@ -153,8 +153,8 @@
     広告目的の Cookie やトラッキング用の Cookie は使用していません。
   </p>
   <p>
-    スマートフォンアプリ版では、アプリデータを端末内のアプリ専用領域に保存し、端末のバックアップや機種変更時の転送の対象外にしています。ログイン情報は、Android では Keystore、iOS ではキーチェーンを使って暗号化して保存し、ログアウトすると消去します。
-    アプリを削除すると端末内のデータは消え、復元や引き継ぎは保証されません。アプリを削除しても、サーバー上のアカウントは削除されません（アカウントの削除は第16項の方法で行えます）。
+    Android アプリ版では、アプリデータを端末内のアプリ専用領域に保存し、端末のバックアップや機種変更時の転送の対象外にしています。ログイン情報は Android の Keystore を使って暗号化して保存し、ログアウトすると消去します。
+    アプリを削除すると端末内のアプリデータは消え、復元や引き継ぎは保証されません。アプリを削除しても、サーバー上のアカウントは削除されません（アカウントの削除は第16項の方法で行えます）。
   </p>
 
   <h2>10. Supabase等の外部サービス利用</h2>
@@ -168,7 +168,8 @@
   <h2>11. Google認証</h2>
   <p>
     Google アカウントでのログイン（Google OAuth）を選択した場合、Google から認証結果と、メールアドレスや表示名などの基本的な情報が本サービスへ渡されます。
-    Google の表示名は、登録時にニックネームの初期値になり、他の利用者に表示されます。プロフィール画像を設定していない場合は、Google のプロフィール画像を初期値として使い、SNS 機能を利用すると他の利用者に表示されます。どちらもプロフィール画面からいつでも変更できます。メールアドレスをニックネームに使うことはありません。
+    Google でアカウントを登録した場合、Google の表示名がサーバー上のニックネームの初期値として保存され、他の利用者に表示されます。プロフィール画面からいつでも変更できます。
+    端末内にプロフィールがない場合、アプリはサーバー上のご自身のプロフィールを読み込み、読み込めるまでは個人情報を含まない既定の名前を表示します。メールアドレスや Google のプロフィール画像を、ニックネームやプロフィール画像の初期値に使うことはありません。
     本サービスが Google のパスワードを取得することはありません。
     Google における情報の取り扱いは、Google のプライバシーポリシーにも従います。
   </p>
@@ -377,8 +378,8 @@
     We do not use advertising cookies or tracking cookies.
   </p>
   <p>
-    In the smartphone app, app data is kept in the app's private storage on your device and is excluded from device backups and device-to-device transfer. Your sign-in information is stored encrypted using the Keystore on Android or the Keychain on iOS, and is removed when you sign out.
-    Deleting the app removes the data on your device, and restoring or transferring it is not guaranteed. Deleting the app does not delete your account on our servers (see section 16 to delete your account).
+    In the Android app, app data is kept in the app's private storage on your device and is excluded from device backups and device-to-device transfer. Your sign-in information is stored encrypted using the Android Keystore, and is removed when you sign out.
+    Deleting the app removes its app data from your device, and restoring or transferring it is not guaranteed. Deleting the app does not delete your account on our servers (see section 16 to delete your account).
   </p>
 
   <h2>10. Supabase and other third-party services</h2>
@@ -391,7 +392,8 @@
   <h2>11. Google sign-in</h2>
   <p>
     If you sign in with Google (Google OAuth), Google passes us the result of the authentication together with basic details such as your
-    email address and display name. Your Google display name becomes your initial nickname when you register and is shown to other members. If you have not set a profile photo, your Google profile picture is used as the initial one and is shown to other members when you use the community feature. You can change both at any time on the Profile screen. Your email address is never used as your nickname.
+    email address and display name. If you register with Google, your Google display name is saved as the initial nickname on our servers and is shown to other members; you can change it at any time on the Profile screen.
+    If there is no profile on your device, the app loads your own profile from our servers and shows a default name that contains no personal information until it can. Your email address and Google profile picture are never used as your initial nickname or profile photo.
     We never receive your Google password. Google's own privacy policy also applies to its handling of your information.
   </p>
 

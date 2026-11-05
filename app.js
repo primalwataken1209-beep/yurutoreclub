@@ -2937,16 +2937,17 @@ function snsGuard(uid){
 }
 
 
-// Own profile row, read back on a device without one; server values win over the defaults.
+// Own profile row for a device without one: {row} (row may be null) once read, null when the read failed.
 async function ytLoadOwnProfile(uid){
   try{const {data,error}=await supabaseClient.from('profiles').select('nickname,hitokoto,intro,avatar_url,fav_acts,pace,region,is_public').eq('id',uid).maybeSingle();
-    return error?null:data;}catch(e){return null;}
+    return error?null:{row:data||null};}catch(e){return null;}
 }
+// Server values win. ytGuess: 'absent' = read, no nickname (defaults insert-only); other truthy = not read yet (nothing sent).
 function ytMergeOwnProfile(u,p){
-  const has=v=>typeof v==='string'&&!!v.trim();
+  p=p||{};const has=v=>typeof v==='string'&&!!v.trim();
   const n={...u,name:has(p.nickname)?p.nickname.slice(0,20):u.name,bio:p.hitokoto||u.bio||'',intro:p.intro||u.intro||'',
     avatarUrl:p.avatar_url||u.avatarUrl,favActs:(p.fav_acts&&p.fav_acts.length)?p.fav_acts:u.favActs,
-    pace:p.pace||u.pace||null,region:p.region||u.region||null,isPublic:p.is_public!==false};
+    pace:p.pace||u.pace||null,region:p.region||u.region||null,isPublic:p.is_public!==false,ytGuess:'absent'};
   if(has(p.nickname))delete n.ytGuess;
   return n;
 }
@@ -2960,15 +2961,16 @@ async function snsEnsureProfile(uid,user,opts){
       if(full){row[key]=v;return;}
       if(v&&v.trim())row[key]=v;      // 中身があるときだけ書く（空で上書きしない）
     };
+    const guess=!full&&user&&user.ytGuess;
+    if(guess&&guess!=='absent')return snsOk(true);   // own row not read yet: never create or overwrite it
     if(user){
-      const guessed=!full&&user.ytGuess;
-      if(!guessed)put('nickname',user.name,40);
+      put('nickname',user.name,40);
       put('hitokoto',user.bio,60);
       put('intro',user.intro,300);
-      if(!guessed&&(full||user.avatarUrl))row.avatar_url=user.avatarUrl||null;
+      if(full||user.avatarUrl)row.avatar_url=user.avatarUrl||null;
       if(full||user.region)row.region=user.region||null;   // 都道府県まで。任意
     }
-    const {error}=await supabaseClient.from('profiles').upsert(row);
+    const {error}=await supabaseClient.from('profiles').upsert(row,guess?{onConflict:'id',ignoreDuplicates:true}:undefined);
     if(error)throw error;
     return snsOk(true);
   }catch(e){return snsNg(e,t('sns.errProfile'));}
@@ -3746,23 +3748,13 @@ function AppLogic({devId}){
       const today=tk();
       const firstOpenToday=saved.lastOpen!==today;
       let next={...saved,auth:userId,lastOpen:today,visits:(saved.visits||0)+(firstOpenToday?1:0)};
-      /* 【v43.1】ログイン済みなのに、この端末にプロフィールが無い場合の受け皿。
-         Googleログイン直後・機種変更・キャッシュ削除のあとがこれにあたる。
-         以前はここで st.user が空のまま登録画面へ戻され、
-         「ログインできたのに登録画面に出戻る」状態になっていた。
-         セッションの情報から最低限のプロフィールを作って、そのままホームへ入れる。 */
-      if(u&&(!next.user||!next.onboard)){
-        // Never a name from the email. ytGuess: defaults stay off the server.
-        const meta=u.user_metadata||{};
-        const guess=(meta.name||meta.full_name||meta.user_name||t('sns.friend'));
-        next={...next,
-          user:{...(next.user||{}),
-            name:((next.user&&next.user.name)||guess||t('sns.friend')).slice(0,20),
-            avatar:(next.user&&next.user.avatar)||null,
-            avatarUrl:(next.user&&next.user.avatarUrl)||meta.avatar_url||meta.picture||null,
-            ytGuess:true},
-          onboard:true};
-        ytLoadOwnProfile(userId).then(p=>{if(p)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p)}:s);});
+      /* 【v43.1】ログイン済みで端末にプロフィールが無い（Googleログイン直後・機種変更など）ときは、
+         個人情報を含まない既定名でホームへ入れ、自分のプロフィールを読み戻す（読めるまで起動ごとに再試行）。 */
+      const nu=next.user;
+      if(u&&(!nu||!next.onboard||nu.ytGuess)){
+        next={...next,user:{...(nu||{}),name:((nu&&nu.name)||t('sns.friend')).slice(0,20),
+          avatar:(nu&&nu.avatar)||null,avatarUrl:(nu&&nu.avatarUrl)||null,ytGuess:(nu&&nu.ytGuess)||true},onboard:true};
+        ytLoadOwnProfile(userId).then(p=>{if(p)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p.row)}:s);});
       }
       setSt(next);
     });
