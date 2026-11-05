@@ -48,6 +48,7 @@
     <li>メールアドレス</li>
     <li>メールとパスワードによる認証情報（認証基盤 Supabase Auth が管理します。当方はパスワードそのものを閲覧できません）</li>
     <li>Google アカウントによるログイン（Google OAuth）を利用した場合の、認証結果として提供される情報</li>
+    <li>ログイン時の IP アドレスと、端末・ブラウザの種類（認証基盤 Supabase Auth がログイン状態の管理のために記録します）</li>
   </ul>
 
   <h3>プロフィール情報（すべて任意入力）</h3>
@@ -70,6 +71,7 @@
     <li>継続日数などの進捗情報</li>
     <li>アプリ内ポイント、ミッションの達成状況</li>
     <li>アプリ利用イベント（アプリの起動、パンダルームを開いた、パンジローをタップした、運動を記録した、ミッションを達成した の5種類）</li>
+    <li>気分の選択、パンジローとの会話で入力した文、タイムカプセルのメッセージ</li>
   </ul>
 
   <h3>SNS機能に関する情報</h3>
@@ -85,7 +87,7 @@
   <h3>画像</h3>
   <ul>
     <li>プロフィール画像（ログイン中の場合、Supabase Storage の avatars 領域に保存されます）</li>
-    <li>運動記録に添付した写真（現在の実装では、利用者の端末内にのみ保存されます）</li>
+    <li>運動記録とタイムカプセルに添付した写真（現在の実装では、利用者の端末内にのみ保存されます）</li>
     <li>SNS投稿に添付した写真（利用者がSNSへの投稿を選択した場合に限り、Supabase Storage に保存されます）</li>
   </ul>
 
@@ -119,6 +121,9 @@
     運動記録は、継続日数の表示、カレンダー、パンダルームの家具解放、ミッションなど、本サービスの機能を成立させるために利用します。
     アプリ利用イベントは、どの機能が使われているかを把握し、本サービスを改善するために利用します。取得しているイベントは前記の5種類のみです。
   </p>
+  <p>
+    ログインしている場合は、運動記録・メモ・進捗、気分の選択、パンジローとの会話の文、タイムカプセルのメッセージなどの控えを、端末内に加えて Supabase 上にも保存します（運動記録とタイムカプセルに添付した写真の中身は送信せず、写真があることと縦横のサイズだけを保存します）。パンジローの返事は端末内で作られ、返事を作るために会話の文を外部の AI サービスなどへ送ることはありません（ログイン中の保存先は、上記の Supabase です）。アプリ利用イベントも、ログインしている場合にのみ送信します。体験版（ログインしていない状態）では、これらの情報をサーバーへ送信しません。
+  </p>
 
   <h2>7. SNS投稿等のユーザー生成コンテンツ</h2>
   <p>
@@ -133,6 +138,7 @@
     運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、運動記録を保存しただけではサーバーへ送信されません。
     ただし、利用者がその写真を含めてSNSへ投稿することを選択した場合、またはSNSの投稿に写真を添付した場合、その写真はSNS機能を提供するためにサーバー（Supabase Storage）へ送信・保存され、投稿と同じ範囲の他の利用者に表示されます。
     送信される写真は、アプリ内で縮小・再変換されたものです。投稿を削除した場合やアカウントを削除した場合、その投稿に添付した写真も削除されます。
+    端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合（以前のバージョンで初期値として設定されたものなど）、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。他の利用者の画面では、外部の URL の画像は読み込まれず、既定のアイコンが表示されます。
   </p>
 
   <h2>9. 端末内に保存される情報</h2>
@@ -148,6 +154,10 @@
     これらは利用者の端末内に保存されるものです。ブラウザの設定から削除することもできます。
     広告目的の Cookie やトラッキング用の Cookie は使用していません。
   </p>
+  <p>
+    Android アプリ版では、アプリデータを端末内のアプリ専用領域に保存し、端末のバックアップや機種変更時の転送の対象外にしています。ログイン情報は Android の Keystore を使って暗号化して保存し、ログアウトすると消去します。
+    アプリを削除すると端末内のアプリデータは消え、復元や引き継ぎは保証されません。アプリを削除しても、サーバー上のアカウントは削除されません（アカウントの削除は第16項の方法で行えます）。
+  </p>
 
   <h2>10. Supabase等の外部サービス利用</h2>
   <p>
@@ -160,6 +170,8 @@
   <h2>11. Google認証</h2>
   <p>
     Google アカウントでのログイン（Google OAuth）を選択した場合、Google から認証結果と、メールアドレスや表示名などの基本的な情報が本サービスへ渡されます。
+    Google でアカウントを登録した場合、Google の表示名がサーバー上のニックネームの初期値として保存され、他の利用者に表示されます。プロフィール画面からいつでも変更できます。
+    端末内にプロフィールがない場合、アプリはサーバー上のご自身のプロフィールを読み込み、読み込めるまでは個人情報を含まない既定の名前を表示します。メールアドレスや Google のプロフィール画像を、ニックネームやプロフィール画像の初期値に使うことはありません。
     本サービスが Google のパスワードを取得することはありません。
     Google における情報の取り扱いは、Google のプライバシーポリシーにも従います。
   </p>
@@ -170,7 +182,7 @@
     <tr><td>メールアドレス</td><td>他の利用者には表示されません</td></tr>
     <tr><td>ニックネーム、プロフィール画像、自己紹介、ひとこと、都道府県</td><td>本サービスにログインしている他の利用者が閲覧できます</td></tr>
     <tr><td>SNSの投稿・コメント・リアクション</td><td>本サービスにログインしている他の利用者が閲覧できます</td></tr>
-    <tr><td>運動記録、継続日数、ミッション、パンダルームの状態</td><td>ご自身のみ（投稿として公開した場合を除く）</td></tr>
+    <tr><td>運動記録、継続日数、ミッション、パンダルームの状態、気分、パンジローとの会話、タイムカプセル</td><td>ご自身のみ（投稿として公開した場合を除く）</td></tr>
     <tr><td>通報の内容</td><td>他の利用者は閲覧できません（当方のみが確認します）</td></tr>
     <tr><td>ブロックの設定</td><td>ご自身のみ</td></tr>
   </table>
@@ -200,6 +212,7 @@
     取得した情報は、本サービスの提供に必要な期間、またはアカウントが存在する間、保存します。
     アカウントを削除した場合は、次項の範囲で削除されます。
     法令上の保存義務がある情報、および紛争対応など正当な理由により保存が必要な情報については、必要な期間に限り保存することがあります。
+    また、Supabase やホスティング事業者が運用のために記録する通信の記録（IP アドレスなど）は、各事業者の定める期間保存されます。
   </p>
 
   <h2>16. アカウント削除・データ削除</h2>
@@ -237,7 +250,7 @@
 
   <h2>20. 制定日・改定日</h2>
   <p>制定日：2026年9月8日</p>
-  <p>最終改定日：2026年9月16日</p>
+  <p>最終改定日：2026年11月5日</p>
 </section>
 
 <!-- ═══════════════════ English ═══════════════════ -->
@@ -265,6 +278,7 @@
     <li>Email address</li>
     <li>Email and password credentials (managed by Supabase Auth; we cannot see your password itself)</li>
     <li>Information returned to us when you choose to sign in with Google (Google OAuth)</li>
+    <li>The IP address and device or browser type used when you sign in (recorded by Supabase Auth to manage your signed-in sessions)</li>
   </ul>
 
   <h3>Profile information (all optional)</h3>
@@ -287,6 +301,7 @@
     <li>Progress information such as your streak</li>
     <li>In-app points and mission completion status</li>
     <li>App usage events (five kinds only: opening the app, opening the Panda Room, tapping Panjiro, logging an activity, completing a mission)</li>
+    <li>The moods you choose, the text you type when chatting with Panjiro, and your time capsule messages</li>
   </ul>
 
   <h3>Community (social) information</h3>
@@ -302,7 +317,7 @@
   <h3>Images</h3>
   <ul>
     <li>Profile photo (when you are signed in, it is stored in the avatars area of Supabase Storage)</li>
-    <li>Photos attached to activity logs (in the current implementation these stay on your own device)</li>
+    <li>Photos attached to activity logs and time capsules (in the current implementation these stay on your own device)</li>
     <li>Photos attached to community posts (stored in Supabase Storage only when you choose to post them to the community)</li>
   </ul>
 
@@ -335,6 +350,9 @@
     Activity logs power the features you see: your streak, the calendar, furniture in the Panda Room, missions and so on.
     App usage events help us understand which features are used so we can improve the Service. Only the five event types listed above are collected.
   </p>
+  <p>
+    If you are signed in, a copy of your activity logs, notes and progress, the moods you choose, your chat text with Panjiro and your time capsule messages is also stored on Supabase in addition to your device (the contents of photos attached to activity logs and time capsules are not sent; only the fact that a photo exists and its dimensions are stored). Panjiro's replies are generated on your device; your chat text is not sent to an outside AI or similar service to produce them (while you are signed in, it is stored in Supabase as described above). App usage events are also sent only while you are signed in. In trial mode (not signed in), none of this is sent to our servers.
+  </p>
 
   <h2>7. Posts and other user-generated content</h2>
   <p>
@@ -349,6 +367,7 @@
     Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers just because you save a log.
     However, if you choose to share a log together with its photo in the community, or attach a photo to a community post, that photo is sent to and stored on our servers (Supabase Storage) so the community feature can work, and it is shown to the same members who can see the post.
     Photos are resized and re-encoded in the app before they are sent. If you delete the post or your account, the photo attached to that post is deleted as well.
+    If the copy of your own profile on a device holds the URL of your Google profile picture (for example, one an earlier version set as the default), that device loads the image from Google's servers when it shows your own posts or your own community profile screen (sending your IP address and other information needed for the connection to Google). Other members' screens do not load images from outside URLs and show the default icon instead.
   </p>
 
   <h2>9. Information stored on your device</h2>
@@ -362,6 +381,10 @@
     This data lives on your device and you can clear it through your browser settings.
     We do not use advertising cookies or tracking cookies.
   </p>
+  <p>
+    In the Android app, app data is kept in the app's private storage on your device and is excluded from device backups and device-to-device transfer. Your sign-in information is stored encrypted using the Android Keystore, and is removed when you sign out.
+    Deleting the app removes its app data from your device, and restoring or transferring it is not guaranteed. Deleting the app does not delete your account on our servers (see section 16 to delete your account).
+  </p>
 
   <h2>10. Supabase and other third-party services</h2>
   <p>
@@ -373,7 +396,9 @@
   <h2>11. Google sign-in</h2>
   <p>
     If you sign in with Google (Google OAuth), Google passes us the result of the authentication together with basic details such as your
-    email address and display name. We never receive your Google password. Google's own privacy policy also applies to its handling of your information.
+    email address and display name. If you register with Google, your Google display name is saved as the initial nickname on our servers and is shown to other members. You can change it at any time on the Profile screen.
+    If there is no profile on your device, the app loads your own profile from our servers and shows a default name that contains no personal information until it can. Your email address and Google profile picture are never used as your initial nickname or profile photo.
+    We never receive your Google password. Google's own privacy policy also applies to its handling of your information.
   </p>
 
   <h2>12. Who can see what</h2>
@@ -382,7 +407,7 @@
     <tr><td>Email address</td><td>Not shown to other members</td></tr>
     <tr><td>Nickname, profile photo, self-introduction, status line, region</td><td>Other signed-in members</td></tr>
     <tr><td>Posts, comments and reactions</td><td>Other signed-in members</td></tr>
-    <tr><td>Activity logs, streak, missions, Panda Room state</td><td>You only, unless you choose to post about them</td></tr>
+    <tr><td>Activity logs, streak, missions, Panda Room state, moods, chats with Panjiro, time capsules</td><td>You only, unless you choose to post about them</td></tr>
     <tr><td>Reports you submit</td><td>Not visible to other members; only we can review them</td></tr>
     <tr><td>Blocks you set</td><td>You only</td></tr>
   </table>
@@ -410,6 +435,7 @@
     We keep your information for as long as your account exists or as long as it is needed to provide the Service.
     If you delete your account, your data is deleted as described in the next section.
     We may keep certain information for a limited period where the law requires it or where there is another legitimate reason, such as handling a dispute.
+    Connection records kept by Supabase and our hosting provider for their operations (such as IP addresses) are retained for the periods those providers set.
   </p>
 
   <h2>16. Deleting your account and your data</h2>
@@ -445,7 +471,7 @@
 
   <h2>20. Dates</h2>
   <p>Effective date: September 8, 2026</p>
-  <p>Last updated: September 16, 2026</p>
+  <p>Last updated: November 5, 2026</p>
 </section>
 
 <footer class="lg-footer">
