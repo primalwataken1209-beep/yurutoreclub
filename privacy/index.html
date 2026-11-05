@@ -71,6 +71,7 @@
     <li>継続日数などの進捗情報</li>
     <li>アプリ内ポイント、ミッションの達成状況</li>
     <li>アプリ利用イベント（アプリの起動、パンダルームを開いた、パンジローをタップした、運動を記録した、ミッションを達成した の5種類）</li>
+    <li>気分の選択、パンジローとの会話で入力した文、タイムカプセルのメッセージ</li>
   </ul>
 
   <h3>SNS機能に関する情報</h3>
@@ -86,7 +87,7 @@
   <h3>画像</h3>
   <ul>
     <li>プロフィール画像（ログイン中の場合、Supabase Storage の avatars 領域に保存されます）</li>
-    <li>運動記録に添付した写真（現在の実装では、利用者の端末内にのみ保存されます）</li>
+    <li>運動記録とタイムカプセルに添付した写真（現在の実装では、利用者の端末内にのみ保存されます）</li>
     <li>SNS投稿に添付した写真（利用者がSNSへの投稿を選択した場合に限り、Supabase Storage に保存されます）</li>
   </ul>
 
@@ -121,7 +122,7 @@
     アプリ利用イベントは、どの機能が使われているかを把握し、本サービスを改善するために利用します。取得しているイベントは前記の5種類のみです。
   </p>
   <p>
-    ログインしている場合は、運動記録・メモ・進捗などの控えを、端末内に加えて Supabase 上にも保存します（運動記録に添付した写真の中身は送信せず、写真があることと縦横のサイズだけを保存します）。アプリ利用イベントも、ログインしている場合にのみ送信します。体験版（ログインしていない状態）では、これらの情報をサーバーへ送信しません。
+    ログインしている場合は、運動記録・メモ・進捗、気分の選択、パンジローとの会話の文、タイムカプセルのメッセージなどの控えを、端末内に加えて Supabase 上にも保存します（運動記録とタイムカプセルに添付した写真の中身は送信せず、写真があることと縦横のサイズだけを保存します）。パンジローの返事は端末内で作られ、会話の文を外部のサービスへ送ることはありません。アプリ利用イベントも、ログインしている場合にのみ送信します。体験版（ログインしていない状態）では、これらの情報をサーバーへ送信しません。
   </p>
 
   <h2>7. SNS投稿等のユーザー生成コンテンツ</h2>
@@ -137,6 +138,7 @@
     運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、運動記録を保存しただけではサーバーへ送信されません。
     ただし、利用者がその写真を含めてSNSへ投稿することを選択した場合、またはSNSの投稿に写真を添付した場合、その写真はSNS機能を提供するためにサーバー（Supabase Storage）へ送信・保存され、投稿と同じ範囲の他の利用者に表示されます。
     送信される写真は、アプリ内で縮小・再変換されたものです。投稿を削除した場合やアカウントを削除した場合、その投稿に添付した写真も削除されます。
+    以前のバージョンで Google のプロフィール画像がプロフィール画像として設定されている場合、その画像はご自身の画面でだけ表示され、そのときご自身の端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。他の利用者の画面では、この画像は読み込まれず、既定のアイコンが表示されます。
   </p>
 
   <h2>9. 端末内に保存される情報</h2>
@@ -168,7 +170,7 @@
   <h2>11. Google認証</h2>
   <p>
     Google アカウントでのログイン（Google OAuth）を選択した場合、Google から認証結果と、メールアドレスや表示名などの基本的な情報が本サービスへ渡されます。
-    Google でアカウントを登録した場合、Google の表示名がサーバー上のニックネームの初期値として保存されることがあり、その場合は他の利用者に表示されます。プロフィール画面からいつでも変更できます。
+    Google でアカウントを登録した場合、Google の表示名がサーバー上のニックネームの初期値として保存され、他の利用者に表示されます。プロフィール画面からいつでも変更できます。
     端末内にプロフィールがない場合、アプリはサーバー上のご自身のプロフィールを読み込み、読み込めるまでは個人情報を含まない既定の名前を表示します。メールアドレスや Google のプロフィール画像を、ニックネームやプロフィール画像の初期値に使うことはありません。
     本サービスが Google のパスワードを取得することはありません。
     Google における情報の取り扱いは、Google のプライバシーポリシーにも従います。
@@ -180,7 +182,7 @@
     <tr><td>メールアドレス</td><td>他の利用者には表示されません</td></tr>
     <tr><td>ニックネーム、プロフィール画像、自己紹介、ひとこと、都道府県</td><td>本サービスにログインしている他の利用者が閲覧できます</td></tr>
     <tr><td>SNSの投稿・コメント・リアクション</td><td>本サービスにログインしている他の利用者が閲覧できます</td></tr>
-    <tr><td>運動記録、継続日数、ミッション、パンダルームの状態</td><td>ご自身のみ（投稿として公開した場合を除く）</td></tr>
+    <tr><td>運動記録、継続日数、ミッション、パンダルームの状態、気分、パンジローとの会話、タイムカプセル</td><td>ご自身のみ（投稿として公開した場合を除く）</td></tr>
     <tr><td>通報の内容</td><td>他の利用者は閲覧できません（当方のみが確認します）</td></tr>
     <tr><td>ブロックの設定</td><td>ご自身のみ</td></tr>
   </table>
@@ -299,6 +301,7 @@
     <li>Progress information such as your streak</li>
     <li>In-app points and mission completion status</li>
     <li>App usage events (five kinds only: opening the app, opening the Panda Room, tapping Panjiro, logging an activity, completing a mission)</li>
+    <li>The moods you choose, the text you type when chatting with Panjiro, and your time capsule messages</li>
   </ul>
 
   <h3>Community (social) information</h3>
@@ -314,7 +317,7 @@
   <h3>Images</h3>
   <ul>
     <li>Profile photo (when you are signed in, it is stored in the avatars area of Supabase Storage)</li>
-    <li>Photos attached to activity logs (in the current implementation these stay on your own device)</li>
+    <li>Photos attached to activity logs and time capsules (in the current implementation these stay on your own device)</li>
     <li>Photos attached to community posts (stored in Supabase Storage only when you choose to post them to the community)</li>
   </ul>
 
@@ -348,7 +351,7 @@
     App usage events help us understand which features are used so we can improve the Service. Only the five event types listed above are collected.
   </p>
   <p>
-    If you are signed in, a copy of your activity logs, notes and progress is also stored on Supabase in addition to your device (the contents of photos attached to activity logs are not sent; only the fact that a photo exists and its dimensions are stored). App usage events are also sent only while you are signed in. In trial mode (not signed in), none of this is sent to our servers.
+    If you are signed in, a copy of your activity logs, notes and progress, the moods you choose, your chat text with Panjiro and your time capsule messages is also stored on Supabase in addition to your device (the contents of photos attached to activity logs and time capsules are not sent; only the fact that a photo exists and its dimensions are stored). Panjiro's replies are generated on your device, and your chat text is not sent to any outside service. App usage events are also sent only while you are signed in. In trial mode (not signed in), none of this is sent to our servers.
   </p>
 
   <h2>7. Posts and other user-generated content</h2>
@@ -364,6 +367,7 @@
     Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers just because you save a log.
     However, if you choose to share a log together with its photo in the community, or attach a photo to a community post, that photo is sent to and stored on our servers (Supabase Storage) so the community feature can work, and it is shown to the same members who can see the post.
     Photos are resized and re-encoded in the app before they are sent. If you delete the post or your account, the photo attached to that post is deleted as well.
+    If an earlier version set your Google profile picture as your profile photo, it is shown only on your own screen, and your device then loads it from Google's servers (sending your IP address and other information needed for the connection to Google). Other members' screens do not load this image and show the default icon instead.
   </p>
 
   <h2>9. Information stored on your device</h2>
@@ -392,7 +396,7 @@
   <h2>11. Google sign-in</h2>
   <p>
     If you sign in with Google (Google OAuth), Google passes us the result of the authentication together with basic details such as your
-    email address and display name. If you register with Google, your Google display name may be saved as the initial nickname on our servers; if so, it is shown to other members. You can change it at any time on the Profile screen.
+    email address and display name. If you register with Google, your Google display name is saved as the initial nickname on our servers and is shown to other members. You can change it at any time on the Profile screen.
     If there is no profile on your device, the app loads your own profile from our servers and shows a default name that contains no personal information until it can. Your email address and Google profile picture are never used as your initial nickname or profile photo.
     We never receive your Google password. Google's own privacy policy also applies to its handling of your information.
   </p>
@@ -403,7 +407,7 @@
     <tr><td>Email address</td><td>Not shown to other members</td></tr>
     <tr><td>Nickname, profile photo, self-introduction, status line, region</td><td>Other signed-in members</td></tr>
     <tr><td>Posts, comments and reactions</td><td>Other signed-in members</td></tr>
-    <tr><td>Activity logs, streak, missions, Panda Room state</td><td>You only, unless you choose to post about them</td></tr>
+    <tr><td>Activity logs, streak, missions, Panda Room state, moods, chats with Panjiro, time capsules</td><td>You only, unless you choose to post about them</td></tr>
     <tr><td>Reports you submit</td><td>Not visible to other members; only we can review them</td></tr>
     <tr><td>Blocks you set</td><td>You only</td></tr>
   </table>
