@@ -2942,15 +2942,17 @@ async function ytLoadOwnProfile(uid){
   try{const {data,error}=await supabaseClient.from('profiles').select('nickname,hitokoto,intro,avatar_url,fav_acts,pace,region,is_public').eq('id',uid).maybeSingle();
     return error?null:{row:data||null};}catch(e){return null;}
 }
-// Server values win. ytGuess: 'absent' = read, no nickname (defaults insert-only); other truthy = not read yet (nothing sent).
+// A server row wins, cleared values too. ytGuess 'absent': read, no nickname, insert-only; other truthy: unread, send nothing.
 function ytMergeOwnProfile(u,p){
-  p=p||{};const has=v=>typeof v==='string'&&!!v.trim();
-  const n={...u,name:has(p.nickname)?p.nickname.slice(0,20):u.name,bio:p.hitokoto||u.bio||'',intro:p.intro||u.intro||'',
-    avatarUrl:p.avatar_url||u.avatarUrl,favActs:(p.fav_acts&&p.fav_acts.length)?p.fav_acts:u.favActs,
-    pace:p.pace||u.pace||null,region:p.region||u.region||null,isPublic:p.is_public!==false,ytGuess:'absent'};
+  if(!p)return {...u,ytGuess:'absent'};
+  const has=v=>typeof v==='string'&&!!v.trim(),url=p.avatar_url||null;
+  const n={...u,name:has(p.nickname)?p.nickname.slice(0,20):u.name,bio:p.hitokoto||'',intro:p.intro||'',
+    avatar:url&&url===u.avatarUrl?u.avatar:null,avatarUrl:url,favActs:Array.isArray(p.fav_acts)?p.fav_acts:[],
+    pace:p.pace||null,region:p.region||null,isPublic:p.is_public!==false,ytGuess:'absent'};
   if(has(p.nickname))delete n.ytGuess;
   return n;
 }
+let YT_PROFILE_READ=0;   // newest read-back only
 async function snsEnsureProfile(uid,user,opts){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   const full=!!(opts&&opts.full);
@@ -3754,7 +3756,8 @@ function AppLogic({devId}){
       if(u&&(!nu||!next.onboard||nu.ytGuess)){
         next={...next,user:{...(nu||{}),name:((nu&&nu.name)||t('sns.friend')).slice(0,20),
           avatar:(nu&&nu.avatar)||null,avatarUrl:(nu&&nu.avatarUrl)||null,ytGuess:(nu&&nu.ytGuess)||true},onboard:true};
-        ytLoadOwnProfile(userId).then(p=>{if(p)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p.row)}:s);});
+        const seq=++YT_PROFILE_READ;
+        ytLoadOwnProfile(userId).then(p=>{if(p&&seq===YT_PROFILE_READ)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p.row)}:s);});
       }
       setSt(next);
     });

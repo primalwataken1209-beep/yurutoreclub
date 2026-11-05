@@ -20,8 +20,9 @@ async function setup(t,{rows={},meta={},readError=null,failIds=[],read=null,seed
   const query=value=>{const q=new Proxy({},{get:(_,k)=>k==='then'?(ok,ng)=>Promise.resolve(value).then(ok,ng):()=>q});return q;};
   const profiles={upsert:(r,o)=>{upserts.push({row:JSON.parse(JSON.stringify(r)),options:o?JSON.parse(JSON.stringify(o)):null});return query({data:null,error:null});},
     select:()=>({eq:(_,id)=>({maybeSingle:()=>{reads.push(id);
-      const answer=()=>(readError||failIds.includes(id))?{data:null,error:readError||{message:'read failed'}}:{data:rows[id]===undefined?null:rows[id],error:null};
-      return read?Promise.resolve(read(id)).then(answer):Promise.resolve(answer());}})})};
+      // The answer is what the server held when asked; read() may hold it back.
+      const a=(readError||failIds.includes(id))?{data:null,error:readError||{message:'read failed'}}:{data:rows[id]===undefined?null:JSON.parse(JSON.stringify(rows[id])),error:null};
+      return read?Promise.resolve(read(id)).then(()=>a):Promise.resolve(a);}})})};
   const mk=(id,m)=>({user:{id,email:EMAIL,user_metadata:m}});
   const session=mk(uid,meta);
   w.supabase={createClient:()=>({from:table=>table==='profiles'?profiles:query({data:[],error:null,count:0}),storage:{from:()=>query({data:null,error:null})},
@@ -34,7 +35,7 @@ async function setup(t,{rows={},meta={},readError=null,failIds=[],read=null,seed
   const entries=()=>Array.from({length:w.localStorage.length},(_,i)=>{const k=w.localStorage.key(i);return [k,w.localStorage.getItem(k)];});
   const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.replace(/\s+/g,'').includes(label));
   const switchTo=async(id,m={})=>{onAuth('SIGNED_IN',mk(id,m));await settle();};
-  return {w,upserts,reads,errors,user,entries,button,switchTo,text:()=>w.document.body.textContent};
+  return {w,rows,upserts,reads,errors,user,entries,button,switchTo,text:()=>w.document.body.textContent};
 }
 const noPersonal=(s,u)=>{const all=s.text()+JSON.stringify(u);assert.doesNotMatch(all,/private\.mailname/);assert.doesNotMatch(all,/Real Person Name|googleusercontent/);};
 
@@ -100,6 +101,41 @@ test('switching accounts while the first read is pending: the late answer never 
   release();await settle();
   assert.equal(s.user(OTHER).name,'ゆるトレ仲間');assert.doesNotMatch(JSON.stringify(s.user(OTHER)),/Aさん/);
   assert.equal(s.upserts.filter(x=>x.row.id===OTHER).length,0);
+});
+// A device whose profile is still a default (onboarding not finished, or the last read failed) can hold older local values.
+const withOldLocal=(entries,patch)=>entries.map(([k,v])=>{if(!(k.startsWith('yurutore-v6-')&&k.endsWith('-'+ME)))return [k,v];
+  const st=JSON.parse(v);st.user={...st.user,...patch};st.onboard=patch.onboard;return [k,JSON.stringify(st)];});
+const OLD={name:'old local',bio:'old bio',intro:'old intro',avatar:'data:image/jpeg;base64,b2xk',avatarUrl:'https://example.invalid/old.jpg',favActs:['walk'],pace:'weekly',region:'大阪府',isPublic:true};
+const CLEARED={nickname:'chosen',hitokoto:'',intro:'',avatar_url:null,fav_acts:[],pace:null,region:null,is_public:false};
+test('existing server row wins over older local values, including values the user cleared (retry after a failed read)',async t=>{
+  const first=await setup(t,{readError:{message:'offline'}});
+  for(const patch of [{...OLD,ytGuess:true,onboard:true},{...OLD,onboard:false}]){
+    const s=await setup(t,{rows:{[ME]:CLEARED},seed:withOldLocal(first.entries(),patch)});
+    const u=s.user();
+    assert.equal(s.reads.length,1);assert.equal(u.name,'chosen');
+    assert.equal(u.bio,'');assert.equal(u.intro,'');assert.equal(u.avatar,null);assert.equal(u.avatarUrl,null);
+    assert.deepEqual(u.favActs,[]);assert.equal(u.pace,null);assert.equal(u.region,null);assert.equal(u.isPublic,false);
+    // The next ordinary SNS save keeps the cleared photo cleared.
+    await s.w.snsEnsureProfile(ME,u);assert.equal('avatar_url' in s.upserts.pop().row,false);
+  }
+});
+test('no server row: the older local values stay on the device and nothing overwrites a row',async t=>{
+  const first=await setup(t,{readError:{message:'offline'}});
+  const s=await setup(t,{rows:{},seed:withOldLocal(first.entries(),{...OLD,ytGuess:true,onboard:true})});
+  const u=s.user();
+  assert.equal(u.bio,'old bio');assert.equal(u.ytGuess,'absent');
+  await s.w.snsEnsureProfile(ME,u);assert.deepEqual(s.upserts.pop().options,{onConflict:'id',ignoreDuplicates:true});
+});
+test('A then B then A: an older answer for A never replaces the newer one',async t=>{
+  let release;const held=new Promise(r=>{release=r;});let calls=0;
+  const s=await setup(t,{rows:{[ME]:{nickname:'A old'}},failIds:[OTHER],read:id=>(id===ME&&++calls===1)?held:null});
+  await s.switchTo(OTHER);
+  s.rows[ME]={nickname:'',hitokoto:'new A'};   // A's row changed on another device meanwhile
+  await s.switchTo(ME);
+  assert.equal(s.user().name,'ゆるトレ仲間');assert.equal(s.user().bio,'new A');
+  release();await settle();
+  assert.equal(s.user().name,'ゆるトレ仲間','the first, older answer is dropped');assert.equal(s.user().bio,'new A');
+  assert.doesNotMatch(JSON.stringify(s.user(OTHER)),/A old|new A/);
 });
 test('a device that already has a profile does not read the server profile again',async t=>{
   const first=await setup(t,{rows:{[ME]:{nickname:'server'}}});
