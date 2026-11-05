@@ -122,7 +122,7 @@
     アプリ利用イベントは、どの機能が使われているかを把握し、本サービスを改善するために利用します。取得しているイベントは前記の5種類のみです。
   </p>
   <p>
-    ログインしている場合は、運動記録・メモ・進捗、気分の選択、パンジローとの会話の文、タイムカプセルのメッセージなどの控えを、端末内に加えて Supabase 上にも保存します（運動記録とタイムカプセルに添付した写真の中身は送信せず、写真があることと縦横のサイズだけを保存します）。パンジローの返事は端末内で作られ、会話の文を外部のサービスへ送ることはありません。アプリ利用イベントも、ログインしている場合にのみ送信します。体験版（ログインしていない状態）では、これらの情報をサーバーへ送信しません。
+    ログインしている場合は、運動記録・メモ・進捗、気分の選択、パンジローとの会話の文、タイムカプセルのメッセージなどの控えを、端末内に加えて Supabase 上にも保存します（運動記録とタイムカプセルに添付した写真の中身は送信せず、写真があることと縦横のサイズだけを保存します）。パンジローの返事は端末内で作られ、返事を作るために会話の文を外部の AI サービスなどへ送ることはありません（ログイン中の保存先は、上記の Supabase です）。アプリ利用イベントも、ログインしている場合にのみ送信します。体験版（ログインしていない状態）では、これらの情報をサーバーへ送信しません。
   </p>
 
   <h2>7. SNS投稿等のユーザー生成コンテンツ</h2>
@@ -138,7 +138,7 @@
     運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、運動記録を保存しただけではサーバーへ送信されません。
     ただし、利用者がその写真を含めてSNSへ投稿することを選択した場合、またはSNSの投稿に写真を添付した場合、その写真はSNS機能を提供するためにサーバー（Supabase Storage）へ送信・保存され、投稿と同じ範囲の他の利用者に表示されます。
     送信される写真は、アプリ内で縮小・再変換されたものです。投稿を削除した場合やアカウントを削除した場合、その投稿に添付した写真も削除されます。
-    以前のバージョンで Google のプロフィール画像がプロフィール画像として設定されている場合、その画像はご自身の画面でだけ表示され、そのときご自身の端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。他の利用者の画面では、この画像は読み込まれず、既定のアイコンが表示されます。
+    端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合（以前のバージョンで初期値として設定されたものなど）、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。他の利用者の画面では、外部の URL の画像は読み込まれず、既定のアイコンが表示されます。
   </p>
 
   <h2>9. 端末内に保存される情報</h2>
@@ -351,7 +351,7 @@
     App usage events help us understand which features are used so we can improve the Service. Only the five event types listed above are collected.
   </p>
   <p>
-    If you are signed in, a copy of your activity logs, notes and progress, the moods you choose, your chat text with Panjiro and your time capsule messages is also stored on Supabase in addition to your device (the contents of photos attached to activity logs and time capsules are not sent; only the fact that a photo exists and its dimensions are stored). Panjiro's replies are generated on your device, and your chat text is not sent to any outside service. App usage events are also sent only while you are signed in. In trial mode (not signed in), none of this is sent to our servers.
+    If you are signed in, a copy of your activity logs, notes and progress, the moods you choose, your chat text with Panjiro and your time capsule messages is also stored on Supabase in addition to your device (the contents of photos attached to activity logs and time capsules are not sent; only the fact that a photo exists and its dimensions are stored). Panjiro's replies are generated on your device; your chat text is not sent to an outside AI or similar service to produce them (while you are signed in, it is stored in Supabase as described above). App usage events are also sent only while you are signed in. In trial mode (not signed in), none of this is sent to our servers.
   </p>
 
   <h2>7. Posts and other user-generated content</h2>
@@ -367,7 +367,7 @@
     Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers just because you save a log.
     However, if you choose to share a log together with its photo in the community, or attach a photo to a community post, that photo is sent to and stored on our servers (Supabase Storage) so the community feature can work, and it is shown to the same members who can see the post.
     Photos are resized and re-encoded in the app before they are sent. If you delete the post or your account, the photo attached to that post is deleted as well.
-    If an earlier version set your Google profile picture as your profile photo, it is shown only on your own screen, and your device then loads it from Google's servers (sending your IP address and other information needed for the connection to Google). Other members' screens do not load this image and show the default icon instead.
+    If the copy of your own profile on a device holds the URL of your Google profile picture (for example, one an earlier version set as the default), that device loads the image from Google's servers when it shows your own posts or your own community profile screen (sending your IP address and other information needed for the connection to Google). Other members' screens do not load images from outside URLs and show the default icon instead.
   </p>
 
   <h2>9. Information stored on your device</h2>

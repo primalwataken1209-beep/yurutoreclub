@@ -33,9 +33,13 @@ test('privacy: Japanese and English carry the same revision date, describe the A
 test('privacy names what the signed-in sync carries and what it leaves out, in both languages',()=>{
   const ja=block(privacy,'ja'),en=block(privacy,'en');
   assert.match(ja,/気分の選択、パンジローとの会話の文、タイムカプセルのメッセージなどの控え/);
-  assert.match(ja,/運動記録とタイムカプセルに添付した写真の中身は送信せず/);assert.match(ja,/パンジローの返事は端末内で作られ/);
+  assert.match(ja,/運動記録とタイムカプセルに添付した写真の中身は送信せず/);
+  // Replies: no outside AI service is used to make them; the text itself is still stored in Supabase while signed in.
+  assert.match(ja,/返事を作るために会話の文を外部の AI サービスなどへ送ることはありません（ログイン中の保存先は、上記の Supabase です）/);
+  assert.match(en,/not sent to an outside AI or similar service to produce them \(while you are signed in, it is stored in Supabase as described above\)/);
+  assert.equal(/会話の文を外部のサービスへ送ることはありません|not sent to any outside service/.test(privacy),false,'no absolute no-send claim');
   assert.match(en,/the moods you choose, your chat text with Panjiro and your time capsule messages/);
-  assert.match(en,/photos attached to activity logs and time capsules are not sent/);assert.match(en,/Panjiro's replies are generated on your device/);
+  assert.match(en,/photos attached to activity logs and time capsules are not sent/);
   assert.match(ja,/パンダルームの状態、気分、パンジローとの会話、タイムカプセル<\/td><td>ご自身のみ/);
   assert.match(en,/Panda Room state, moods, chats with Panjiro, time capsules<\/td><td>You only/);
 });
@@ -57,11 +61,17 @@ test('the code matches: an external Google image is shown only to its owner, nev
     AVATAR_REF_RE:/^avatars\/([0-9a-f-]{36})\/avatar\.jpg(?:\?v=([0-9]{1,16}))?$/});
   const g='https://lh3.googleusercontent.com/a/example';
   assert.equal(c.avatarRefFromValue(g),null,'not a Storage avatar, so other members get the default icon');
-  assert.equal(c.selfAvatarLocal({avatarUrl:g}),g,'the owner sees it on their own screen');
+  assert.equal(c.selfAvatarLocal({avatarUrl:g}),g,'the owner sees it, from the device copy of their own profile');
+  assert.equal(c.selfAvatarLocal({avatarUrl:'http://lh3.googleusercontent.com/a/example'}),null,'only https');
+  // Only two places pass the owner's own image: their own posts (isMine) and their own profile screen (isMe).
+  assert.equal((app.match(/selfAvatarLocal\(state\.user\)/g)||[]).length,2);
   assert.match(app,/isMine\?selfAvatarLocal\(state\.user\):null/);assert.match(app,/isMe\?selfAvatarLocal\(state\.user\):null/);
+  assert.match(app,/<SnsAvatar value=\{p&&p\.avatar_url\} className="avatar"/,'lists pass no local image');
   const ja=block(privacy,'ja'),en=block(privacy,'en');
-  assert.match(ja,/ご自身の画面でだけ表示され/);assert.match(ja,/他の利用者の画面では、この画像は読み込まれず/);
-  assert.match(en,/shown only on your own screen/);assert.match(en,/Other members' screens do not load this image/);
+  assert.match(ja,/端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合/);
+  assert.match(ja,/ご自身の投稿やご自身の SNS プロフィール画面を表示するときに/);assert.match(ja,/他の利用者の画面では、外部の URL の画像は読み込まれず/);
+  assert.match(en,/when it shows your own posts or your own community profile screen/);assert.match(en,/Other members' screens do not load images from outside URLs/);
+  assert.equal(/ご自身の画面でだけ表示され|shown only on your own screen/.test(privacy),false);
 });
 test('account deletion: post photos are listed and the revision date is shown in both languages',()=>{
   const ja=block(deletion,'ja'),en=block(deletion,'en');
