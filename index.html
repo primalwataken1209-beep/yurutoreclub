@@ -4886,6 +4886,19 @@ function snsGuard(uid){
 }
 
 
+// Own profile row, read back on a device without one; server values win over the defaults.
+async function ytLoadOwnProfile(uid){
+  try{const {data,error}=await supabaseClient.from('profiles').select('nickname,hitokoto,intro,avatar_url,fav_acts,pace,region,is_public').eq('id',uid).maybeSingle();
+    return error?null:data;}catch(e){return null;}
+}
+function ytMergeOwnProfile(u,p){
+  const has=v=>typeof v==='string'&&!!v.trim();
+  const n={...u,name:has(p.nickname)?p.nickname.slice(0,20):u.name,bio:p.hitokoto||u.bio||'',intro:p.intro||u.intro||'',
+    avatarUrl:p.avatar_url||u.avatarUrl,favActs:(p.fav_acts&&p.fav_acts.length)?p.fav_acts:u.favActs,
+    pace:p.pace||u.pace||null,region:p.region||u.region||null,isPublic:p.is_public!==false};
+  if(has(p.nickname))delete n.ytGuess;
+  return n;
+}
 async function snsEnsureProfile(uid,user,opts){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   const full=!!(opts&&opts.full);
@@ -4897,10 +4910,11 @@ async function snsEnsureProfile(uid,user,opts){
       if(v&&v.trim())row[key]=v;      // 中身があるときだけ書く（空で上書きしない）
     };
     if(user){
-      put('nickname',user.name,40);
+      const guessed=!full&&user.ytGuess;
+      if(!guessed)put('nickname',user.name,40);
       put('hitokoto',user.bio,60);
       put('intro',user.intro,300);
-      if(full||user.avatarUrl)row.avatar_url=user.avatarUrl||null;
+      if(!guessed&&(full||user.avatarUrl))row.avatar_url=user.avatarUrl||null;
       if(full||user.region)row.region=user.region||null;   // 都道府県まで。任意
     }
     const {error}=await supabaseClient.from('profiles').upsert(row);
@@ -5687,15 +5701,17 @@ function AppLogic({devId}){
          「ログインできたのに登録画面に出戻る」状態になっていた。
          セッションの情報から最低限のプロフィールを作って、そのままホームへ入れる。 */
       if(u&&(!next.user||!next.onboard)){
+        // Never a name from the email. ytGuess: defaults stay off the server.
         const meta=u.user_metadata||{};
-        const guess=(meta.name||meta.full_name||meta.user_name||
-                     String(u.email||'').split('@')[0]||t('sns.friend'));
+        const guess=(meta.name||meta.full_name||meta.user_name||t('sns.friend'));
         next={...next,
           user:{...(next.user||{}),
             name:((next.user&&next.user.name)||guess||t('sns.friend')).slice(0,20),
             avatar:(next.user&&next.user.avatar)||null,
-            avatarUrl:(next.user&&next.user.avatarUrl)||meta.avatar_url||meta.picture||null},
+            avatarUrl:(next.user&&next.user.avatarUrl)||meta.avatar_url||meta.picture||null,
+            ytGuess:true},
           onboard:true};
+        ytLoadOwnProfile(userId).then(p=>{if(p)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p)}:s);});
       }
       setSt(next);
     });
@@ -11689,7 +11705,7 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
         avatar:avatar||null,avatarUrl,
         favActs,pace:pace||null,
         region:region==='未設定'?null:region,
-        isPublic};
+        isPublic,ytGuess:false};
       setState(s=>({...s,user:nextUser}));
       syncProfileToSupabase(state.auth,nextUser); // profilesテーブルへも同期（未作成なら無視）
       snsEnsureProfile(state.auth,nextUser,{full:true}); // 【v43】SNS表示用の列(nickname/intro/region等)も更新（消した項目も反映）
