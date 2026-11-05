@@ -2937,6 +2937,22 @@ function snsGuard(uid){
 }
 
 
+// Own profile row for a device without one: {row} (row may be null) once read, null when the read failed.
+async function ytLoadOwnProfile(uid){
+  try{const {data,error}=await supabaseClient.from('profiles').select('nickname,hitokoto,intro,avatar_url,fav_acts,pace,region,is_public').eq('id',uid).maybeSingle();
+    return error?null:{row:data||null};}catch(e){return null;}
+}
+// A server row wins, cleared values too. ytGuess 'absent': read, no nickname, insert-only; other truthy: unread, send nothing.
+function ytMergeOwnProfile(u,p){
+  if(!p)return {...u,ytGuess:'absent'};
+  const has=v=>typeof v==='string'&&!!v.trim(),url=p.avatar_url||null;
+  const n={...u,name:has(p.nickname)?p.nickname.slice(0,20):u.name,bio:p.hitokoto||'',intro:p.intro||'',
+    avatar:url&&url===u.avatarUrl?u.avatar:null,avatarUrl:url,favActs:Array.isArray(p.fav_acts)?p.fav_acts:[],
+    pace:p.pace||null,region:p.region||null,isPublic:p.is_public!==false,ytGuess:'absent'};
+  if(has(p.nickname))delete n.ytGuess;
+  return n;
+}
+let YT_PROFILE_READ=0;   // newest read-back only
 async function snsEnsureProfile(uid,user,opts){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
   const full=!!(opts&&opts.full);
@@ -2947,6 +2963,8 @@ async function snsEnsureProfile(uid,user,opts){
       if(full){row[key]=v;return;}
       if(v&&v.trim())row[key]=v;      // 中身があるときだけ書く（空で上書きしない）
     };
+    const guess=!full&&user&&user.ytGuess;
+    if(guess&&guess!=='absent')return snsOk(true);   // own row not read yet: never create or overwrite it
     if(user){
       put('nickname',user.name,40);
       put('hitokoto',user.bio,60);
@@ -2954,7 +2972,7 @@ async function snsEnsureProfile(uid,user,opts){
       if(full||user.avatarUrl)row.avatar_url=user.avatarUrl||null;
       if(full||user.region)row.region=user.region||null;   // 都道府県まで。任意
     }
-    const {error}=await supabaseClient.from('profiles').upsert(row);
+    const {error}=await supabaseClient.from('profiles').upsert(row,guess?{onConflict:'id',ignoreDuplicates:true}:undefined);
     if(error)throw error;
     return snsOk(true);
   }catch(e){return snsNg(e,t('sns.errProfile'));}
@@ -3731,21 +3749,14 @@ function AppLogic({devId}){
       const today=tk();
       const firstOpenToday=saved.lastOpen!==today;
       let next={...saved,auth:userId,lastOpen:today,visits:(saved.visits||0)+(firstOpenToday?1:0)};
-      /* 【v43.1】ログイン済みなのに、この端末にプロフィールが無い場合の受け皿。
-         Googleログイン直後・機種変更・キャッシュ削除のあとがこれにあたる。
-         以前はここで st.user が空のまま登録画面へ戻され、
-         「ログインできたのに登録画面に出戻る」状態になっていた。
-         セッションの情報から最低限のプロフィールを作って、そのままホームへ入れる。 */
-      if(u&&(!next.user||!next.onboard)){
-        const meta=u.user_metadata||{};
-        const guess=(meta.name||meta.full_name||meta.user_name||
-                     String(u.email||'').split('@')[0]||t('sns.friend'));
-        next={...next,
-          user:{...(next.user||{}),
-            name:((next.user&&next.user.name)||guess||t('sns.friend')).slice(0,20),
-            avatar:(next.user&&next.user.avatar)||null,
-            avatarUrl:(next.user&&next.user.avatarUrl)||meta.avatar_url||meta.picture||null},
-          onboard:true};
+      /* 【v43.1】ログイン済みで端末にプロフィールが無い（Googleログイン直後・機種変更など）ときは、
+         個人情報を含まない既定名でホームへ入れ、自分のプロフィールを読み戻す（読めるまで起動ごとに再試行）。 */
+      const nu=next.user;
+      if(u&&(!nu||!next.onboard||nu.ytGuess)){
+        next={...next,user:{...(nu||{}),name:((nu&&nu.name)||t('sns.friend')).slice(0,20),
+          avatar:(nu&&nu.avatar)||null,avatarUrl:(nu&&nu.avatarUrl)||null,ytGuess:(nu&&nu.ytGuess)||true},onboard:true};
+        const seq=++YT_PROFILE_READ;
+        ytLoadOwnProfile(userId).then(p=>{if(p&&seq===YT_PROFILE_READ)setSt(s=>(s&&s.auth===userId&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p.row)}:s);});
       }
       setSt(next);
     });
@@ -9701,7 +9712,7 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
         avatar:avatar||null,avatarUrl,
         favActs,pace:pace||null,
         region:region==='未設定'?null:region,
-        isPublic};
+        isPublic,ytGuess:false};
       setState(s=>({...s,user:nextUser}));
       syncProfileToSupabase(state.auth,nextUser); // profilesテーブルへも同期（未作成なら無視）
       snsEnsureProfile(state.auth,nextUser,{full:true}); // 【v43】SNS表示用の列(nickname/intro/region等)も更新（消した項目も反映）
