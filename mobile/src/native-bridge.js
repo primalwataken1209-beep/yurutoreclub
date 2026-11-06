@@ -113,9 +113,17 @@
     if(u.protocol==='https:'&&(cfg.allowedExternalOrigins||[]).indexOf(u.origin)>=0)return 'browser';
     return 'blocked';
   }
+  /* The native local servers (Android html5mode, iOS Router) answer every path without a file extension with the root
+     index.html, so /terms/ would load the app page under the wrong base URL and show a blank screen. Bundle pages are
+     addressed by their real file. */
+  function pageUrl(u){
+    var p=u.pathname;
+    if(p==='/'||p.split('/').pop().indexOf('.')>=0)return u.href;
+    return u.protocol+'//'+u.host+p.replace(/\/?$/,'/index.html')+u.search+u.hash;
+  }
   function follow(raw){
     var kind=classify(raw),u=parse(raw);
-    if(kind==='inside')location.assign(u.href);
+    if(kind==='inside')location.assign(pageUrl(u));
     else if(kind==='system')location.href=u.href;
     else if(kind==='browser'&&Browser)Browser.open({url:u.href});
     else console.warn('[native] link blocked');
@@ -125,7 +133,7 @@
     var a=e.target&&e.target.closest&&e.target.closest('a[href]');
     if(!a)return;
     var kind=classify(a.href);
-    if(kind==='inside'&&a.target!=='_blank')return;  // ordinary in-bundle navigation
+    if(kind==='inside'&&a.target!=='_blank'&&pageUrl(parse(a.href))===a.href)return;  // ordinary in-bundle navigation
     e.preventDefault();
     follow(a.href);
   },true);
