@@ -220,7 +220,7 @@ ja:{
     delFailContact:'解決しない場合はお問い合わせください',
     delNeedLogin:'アカウントの削除にはログインが必要だよ🐼',
     menuAria:'この投稿のメニュー',
-    report:'この投稿を通報', reportComment:'このコメントを通報',
+    report:'この投稿を通報', reportComment:'このコメントを通報', reportUser:'このユーザーを通報',
     reportTitle:'通報する', reportSub:'どんな内容か教えてね。運営だけが確認します。',
     reasonHarassment:'嫌がらせ・誹謗中傷', reasonInappropriate:'不適切な内容',
     reasonSpam:'スパム', reasonPersonal:'個人情報',
@@ -228,7 +228,7 @@ ja:{
     reportNotePh:'補足があれば書いてね（任意）',
     reportSend:'通報する', reportSending:'送信中…',
     reportDone:'通報を受け付けたよ。ありがとう🐼',
-    reportDup:'この投稿はすでに通報済みだよ🐼',
+    reportDup:'この投稿はすでに通報済みだよ🐼', reportUserDup:'このユーザーはすでに通報済みだよ🐼',
     reportFail:'通報を送れなかったみたい。もう一度ためしてね🐼',
     reportNeedReason:'理由をひとつ選んでね🐼',
     block:'このユーザーをブロック', unblock:'ブロックを解除',
@@ -330,7 +330,7 @@ ja:{
     setSound:'効果音', setSoundSub:'タップ時の小さな音',
     setNight:'夜間モード', setNightSub:'18時〜6時に部屋が夜になるよ',
     setAuto:'自動', setBright:'常に明るい', setNote:'設定はこの端末に保存されるよ',
-    gotItem:'をゲット！', gotItemSub:'パンダルームに{name}が増えたよ', future:'これから(将来のたのしみ)',
+    gotItem:'をゲット！', gotItemSub:'パンダルームに{name}が増えたよ', future:'これから(将来のたのしみ)', waiting:'条件クリア！家具は1日1個ずつ届くよ',
     errTitle:'ごめんね〜、お部屋がちょっと休憩中みたい', errSub:'もう一度開いてみてね', errHome:'ホームへ戻る',
     unlocked:'個 解放', missionDoneToday:'今日は達成済み！えらい〜🐼✨', missionDoBtn:'できた！（達成する）',
     missionFromHome:'ホーム画面から達成できるよ🐼', missionTotal:'いままでの達成：{n}回',
@@ -505,7 +505,7 @@ en:{
     delFailContact:'If this keeps happening, please contact us',
     delNeedLogin:'You need to be signed in to delete an account 🐼',
     menuAria:'Post menu',
-    report:'Report post', reportComment:'Report comment',
+    report:'Report post', reportComment:'Report comment', reportUser:'Report user',
     reportTitle:'Report', reportSub:'Tell us what the problem is. Only we can see this.',
     reasonHarassment:'Harassment or abuse', reasonInappropriate:'Inappropriate content',
     reasonSpam:'Spam', reasonPersonal:'Personal information',
@@ -513,7 +513,7 @@ en:{
     reportNotePh:'Anything else you want to add (optional)',
     reportSend:'Send report', reportSending:'Sending…',
     reportDone:'Thanks. We have received your report 🐼',
-    reportDup:'You have already reported this 🐼',
+    reportDup:'You have already reported this 🐼', reportUserDup:'You have already reported this user 🐼',
     reportFail:"We couldn't send that report. Please try again 🐼",
     reportNeedReason:'Please pick one reason 🐼',
     block:'Block this user', unblock:'Unblock',
@@ -615,7 +615,7 @@ en:{
     setSound:'Sound', setSoundSub:'A small sound when you tap',
     setNight:'Night mode', setNightSub:'The room turns to evening from 6pm to 6am',
     setAuto:'Auto', setBright:'Always bright', setNote:'Settings are saved on this device',
-    gotItem:' arrived!', gotItemSub:'{name} is in the Panda Room now', future:'Coming later',
+    gotItem:' arrived!', gotItemSub:'{name} is in the Panda Room now', future:'Coming later', waiting:'Unlocked! New furniture arrives one piece a day',
     errTitle:'Sorry, the room is taking a little break', errSub:'Try opening it once more', errHome:'Back to home',
     unlocked:'unlocked', missionDoneToday:'Already done today. Lovely 🐼✨', missionDoBtn:'Done!',
     missionFromHome:'You can finish this from the home screen 🐼', missionTotal:'Finished so far: {n}',
@@ -3358,7 +3358,8 @@ async function snsSetBlock(uid,targetId,on,user){
    ・同じ対象を2回通報した場合は unique index で弾かれる → 専用の文言を返す */
 async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   const g=snsGuard(uid); if(g)return {data:null,error:g};
-  if(['post','comment'].indexOf(targetType)<0)return {data:null,error:t('legal.reportFail')};
+  if(['post','comment','user'].indexOf(targetType)<0)return {data:null,error:t('legal.reportFail')};
+  if(targetType==='user'&&String(targetId)===String(uid))return {data:null,error:t('legal.reportFail')};
   if(!targetId)return {data:null,error:t('legal.reportFail')};
   if(!REPORT_REASONS.some(r=>r.id===reason))return {data:null,error:t('legal.reportNeedReason')};
   try{
@@ -3374,7 +3375,7 @@ async function snsCreateReport(uid,{targetType,targetId,reason,note}){
   }catch(e){
     const code=(e&&(e.code||e.status))||'';
     const msg=String((e&&e.message)||'');
-    if(code==='23505'||/duplicate key/i.test(msg))return {data:null,error:t('legal.reportDup')};
+    if(code==='23505'||/duplicate key/i.test(msg))return {data:null,error:t(targetType==='user'?'legal.reportUserDup':'legal.reportDup')};
     return snsNg(e,t('legal.reportFail'));
   }
 }
@@ -3476,7 +3477,7 @@ function ytClearLocalDataForUser(uid){
     'yurutore_room_talklog_v1',    // 旧・共通の会話ログ（v51.4.5以降は読み込まない。退会時は従来どおり削除）
     'yurutore_room_talklog_v1_'+id // 【v51.4.5】退会した本人の会話ログ（ユーザー別キー）
   ];
-  keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+  keys.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });delete FURN_CACHE[id];
   try{ if(window.storage&&window.storage.remove){
     window.storage.remove('yurutore-v6-ios-'+id);
     window.storage.remove('yurutore-v6-android-'+id);
@@ -3491,7 +3492,7 @@ function ytResetGuestRoomIfFresh(s){
     const x=s||{};
     const empty=v=>!v||(Array.isArray(v)?v.length===0:Object.keys(v).length===0);
     if(!(empty(x.reports)&&empty(x.completedMissions)&&empty(x.missionHistory)&&!(x.pandaPoints>0)&&empty(x.pandaChats)&&empty(x.timeCapsules)))return;
-    localStorage.removeItem(roomUnlockKey('guest'));
+    localStorage.removeItem(roomUnlockKey('guest'));delete FURN_CACHE.guest;
     localStorage.removeItem(pandaStatsKey('guest'));
     localStorage.removeItem(roomTalkLogKey('guest')); // 【v51.4.5】前回の体験版の会話ログも片付ける
   }catch(e){}
@@ -3772,6 +3773,12 @@ function AppLogic({devId}){
     const userId=session?.user?.id||'guest';
     if(st)saveSt(devId,userId,{...st,auth:userId});
   },[st,devId,session?.user?.id]);
+
+  // 【家具1日1個】状態が変わるたびに獲得を確定(持ち主一致時のみ)
+  useEffect(()=>{
+    const userId=session?.user?.id||'guest';
+    if(st&&authChecked&&st.auth===userId)room30Furniture(st,calcStreak(st.reports||[]),true);
+  },[st,authChecked,session?.user?.id]);
 
   if(!st||!authChecked)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
 
@@ -4096,7 +4103,7 @@ function AppLogic({devId}){
 
   const submitRep=async({aid,note,photo})=>{
     const ts=Date.now();
-    const nr={id:'r'+ts,aid,note,photo:photo||null,ts};
+    const nr={id:'r'+ts,aid,note,photo:photo||null,ts,fc:1};
     const nrs=[...st.reports,nr];
     const isFirst=st.reports.length===0;
     const lastTs=st.reports.length?st.reports[st.reports.length-1].ts:ts;
@@ -5511,33 +5518,6 @@ function roomStats(state,streak){
   const pandaPoints=pandaPointCount(state);
   return {total:reports.length,foodCount,walkCount,gymCount,photoCount,ramenReaction,nightCount,morningCount,stretchCount,streak,chatCount,missionDone,pandaPoints};
 }
-function pandaRoomItems(state,streak){
-  const st=roomStats(state,streak);
-  const list=[
-    {id:'plant',icon:'🪴',name:'観葉植物',name_en:'Houseplant',desc:'運動を1回記録',desc_en:"Log one workout",ok:st.total>=1,place:'右奥'},
-    {id:'cushion',icon:'🟡',name:'もちもちクッション',name_en:'Squishy cushion',desc:'3日分の記録',desc_en:"3 logs",ok:st.total>=3,place:'ラグの上'},
-    {id:'chat',icon:'💬',name:'会話クッション',name_en:'Chat cushion',desc:'パンダと1回会話',desc_en:"Chat with Panjiro once",ok:st.chatCount>=1,place:'ソファ横'},
-    {id:'timecapsule',icon:'📮',name:'未来ポスト',name_en:'Future post box',desc:'タイムカプセルを1通保存',desc_en:"Save one time capsule",ok:(state.timeCapsules||[]).length>=1,place:'窓の下'},
-    {id:'ramen',icon:'🍜',name:'ラーメン棚',name_en:'Ramen shelf',desc:'飯テロ投稿・食べ物メモ1回',desc_en:"One food note or reaction",ok:st.foodCount>=1||st.ramenReaction>=1,place:'右の棚'},
-    {id:'lamp',icon:'🌙',name:'夜ふかしランプ',name_en:'Late-night lamp',desc:'夜の記録1回',desc_en:"One evening log",ok:st.nightCount>=1,place:'左の床'},
-    {id:'photo',icon:'🖼️',name:'思い出フォト',name_en:'Memory photo',desc:'写真つき記録1回',desc_en:"One log with a photo",ok:st.photoCount>=1,place:'壁'},
-    {id:'mat',icon:'🚶',name:'さんぽマット',name_en:'Walking mat',desc:'ウォーキング/ラン1回',desc_en:"One walk or run",ok:st.walkCount>=1,place:'中央床'},
-    {id:'dumbbell',icon:'🏋️',name:'ちょいトレ道具',name_en:'Little workout kit',desc:'ジム/筋トレ/ストレッチ1回',desc_en:"One gym, strength or stretch",ok:st.gymCount>=1,place:'右床'},
-    {id:'missionPlant',icon:'🌱',name:'ミッション若葉',name_en:'Mission sprout',desc:'ゆるミッション5回達成',desc_en:"5 missions done",ok:st.missionDone>=5,place:'左奥'},
-    {id:'sofa',icon:'🛋️',name:'ふわふわソファ',name_en:'Fluffy sofa',desc:'ゆるミッション30回達成',desc_en:"30 missions done",ok:st.missionDone>=30,place:'奥の壁'},
-    {id:'neon',icon:'💗',name:'ネオン看板',name_en:'Neon sign',desc:'パンダポイント100pt',desc_en:"100 panda points",ok:st.pandaPoints>=100,place:'壁'}, /* 【v29変更】旧pointStar。描かれている素材に合わせて改名 */
-    {id:'crown',icon:'👑',name:'常連の王冠',name_en:'A regulars crown',desc:'7日継続',desc_en:"7 days in a row",ok:st.streak>=7,place:'パンダの頭上'}
-  ];
-  /* 【v29新規追加】一度でも達成した家具は永続的に解放(没収なし)。
-     とくにcrownは従来streakが切れると消えていたため、everOkで保持する。 */
-  try{
-    const memo=loadRoomUnlockMemo(state&&state.auth);
-    if(memo&&memo.everOk&&memo.everOk.length){
-      for(const it of list){ if(memo.everOk.indexOf(it.id)>=0)it.ok=true; }
-    }
-  }catch(e){}
-  return list;
-}
 function roomSeasonIcon(){
   const m=new Date().getMonth()+1;
   if([3,4,5].includes(m))return '🌸';
@@ -5988,7 +5968,7 @@ function loadRoomUnlockMemo(uid){
   return null; // 初回(未初期化)
 }
 function saveRoomUnlockMemo(uid,m){
-  try{localStorage.setItem(roomUnlockKey(uid),JSON.stringify(m));}catch(e){}
+  try{localStorage.setItem(roomUnlockKey(uid),JSON.stringify(m));return true;}catch(e){return false;}
 }
 
 /* ═══════════════ 【v30新規追加】はじまりの部屋 ═══════════════
@@ -6248,7 +6228,8 @@ function migrateUnlockIds(uid){
    src: assets/panda-room/v30/ 内のファイル名。素材未着の家具はsrcのままでよい。
    読み込み失敗時はそのレイヤーだけ非表示(部屋は壊れない)。
    unlock: (st,ps,extra)=>bool。st=roomStats, ps=pandaStats。'future'=条件は将来確定(一覧に「これから」表示) */
-function room30Items(state,streak){
+/* 【家具1日1個】ok=条件達成のみ。獲得済みは room30Furniture */
+function room30Eligibility(state,streak){
   const st=roomStats(state,streak);
   const ps=loadPandaStats(state&&state.auth);
   const month=new Date().getMonth()+1;
@@ -6293,17 +6274,61 @@ function room30Items(state,streak){
     {id:'panda_plush',icon:'🧸',name:'パンダのぬいぐるみ',name_en:'Panda plushie',src:'f39_panda_plush.webp',z:28,cond:'記録50回',memory:'ずっと一緒にいた証だよ',cond_en:"50 logs",memory_en:"Proof we have been together all along",hs:{l:3.0,t:60.77,w:5.5,h:8.73},ok:st.total>=50},
     {id:'wall_garland',icon:'🎀',name:'お祝いガーランド',name_en:'Party garland',src:'f39_wall_garland.webp',z:1,cond:'記録100回',memory:'100回。もう立派な習慣だね🎉',cond_en:"100 logs",memory_en:"One hundred. A proper habit now 🎉",hs:{l:24.0,t:0.55,w:22.0,h:10.45},ok:st.total>=100}
   ];
-  // 成長家具の解放数(基本3点を除く)→ storagebox判定
-  const grown=L.filter(i=>!i.always&&i.ok).length;
-  const sb=L.find(i=>i.id==='storagebox'); sb.ok=grown>=5;
-  // 一度でも達成した家具は永続化(everOk)
-  try{
-    const memo=loadRoomUnlockMemo(state&&state.auth);
-    if(memo&&memo.everOk&&memo.everOk.length){
-      for(const it of L){ if(memo.everOk.indexOf(it.id)>=0)it.ok=true; }
-    }
-  }catch(e){}
   return L;
+}
+/* 【家具1日1個】新規獲得は1日1個・獲得済みは保持(仕様はtests/furniture-daily-cap.test.cjs)。
+   移行は印(fc)のない旧記録だけ。保存できない間は新しい家具を渡さず、セッション内の状態はFURN_CACHEに残す。
+   保存済みの記録を優先し、FURN_CACHEは保存失敗中だけ使う(保存済みのseen/everOk/ownedは合流させる) */
+const FURN_CACHE={};
+function furnDayNum(ts){const d=new Date(ts);return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
+function room30Furniture(state,streak,commit){
+  const L=room30Eligibility(state,streak);
+  const uid=state&&state.auth,key=uid||'guest',c=FURN_CACHE[key];
+  const grown=L.filter(i=>!i.always);
+  const sb=L.find(i=>i.id==='storagebox');
+  let memo=null,changed=false;
+  let saved=null;try{saved=loadRoomUnlockMemo(uid);}catch(e){}
+  if(c&&(c.failed||!saved)){
+    memo=JSON.parse(JSON.stringify(c.memo));
+    if(saved){
+      for(const f of ['seen','everOk'])(saved[f]||[]).forEach(id=>{if(memo[f].indexOf(id)<0)memo[f].push(id);});
+      if(Array.isArray(saved.owned))saved.owned.forEach(o=>{if(!memo.owned.some(x=>x.id===o.id))memo.owned.push(o);});
+      memo.lastGrantDay=Math.max(Number(memo.lastGrantDay)||0,Number(saved.lastGrantDay)||0);
+    }
+  }else memo=saved;
+  if(!memo||!Array.isArray(memo.owned)){
+    const legacy={},old=(state.reports||[]).filter(r=>!r.fc);
+    ((memo&&memo.everOk)||[]).forEach(id=>{legacy[ROOM30_ID_MIGRATE[id]||id]=true;});
+    if(memo||old.length){
+      const E=room30Eligibility({...state,reports:old},calcStreak(old)).filter(i=>!i.always);
+      const esb=E.find(i=>i.id==='storagebox');esb.ok=E.filter(i=>i.id!=='storagebox'&&i.ok).length>=5;
+      E.forEach(i=>{if(i.ok)legacy[i.id]=true;});
+    }
+    const owned=grown.filter(i=>legacy[i.id]).map(i=>({id:i.id,day:0}));
+    memo={seen:memo?memo.seen:L.filter(i=>i.always).map(i=>i.id).concat(owned.map(o=>o.id)),everOk:(memo?memo.everOk:[]).slice(),owned,lastGrantDay:0};
+    changed=true;
+  }
+  for(const o of memo.owned)if(memo.everOk.indexOf(o.id)<0){memo.everOk.push(o.id);changed=true;}
+  const base=JSON.parse(JSON.stringify(memo));
+  const has={};memo.owned.forEach(o=>{has[o.id]=true;});
+  sb.ok=grown.filter(i=>i.id!=='storagebox'&&has[i.id]).length>=5;   // 獲得済み5点
+  const today=furnDayNum(Date.now());
+  const last=Number(memo.lastGrantDay)||0;
+  if((commit||!(c&&c.failed))&&today>last&&!memo.owned.some(o=>o.day===today)){
+    const pick=grown.find(i=>i.ok&&!i.future&&!has[i.id]);
+    if(pick){memo.owned.push({id:pick.id,day:today});memo.everOk.push(pick.id);memo.lastGrantDay=today;has[pick.id]=true;changed=true;}
+  }
+  if(commit&&(changed||(c&&c.failed))){
+    if(saveRoomUnlockMemo(uid,memo))FURN_CACHE[key]={memo};
+    else{FURN_CACHE[key]={memo:base,failed:true};memo=base;for(const k in has)delete has[k];base.owned.forEach(o=>{has[o.id]=true;});}
+  }
+  return L.map(i=>{
+    const owned=!!(i.always||has[i.id]);
+    return {...i,ok:owned,waiting:!owned&&!!i.ok&&!i.future};
+  });
+}
+function room30Items(state,streak){
+  return room30Furniture(state,streak,false);
 }
 /* 思い出コレクション(部屋には出ない・一覧のみ。旧v29項目の互換) */
 function room30Memories(state,streak){
@@ -7744,6 +7769,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
   useEffect(()=>{
     try{
       const uid=state&&state.auth;
+      room30Furniture(state,streak,true);
       let memo=loadRoomUnlockMemo(uid);
       if(!memo){
         saveRoomUnlockMemo(uid,{seen:okIds.slice(),everOk:okIds.slice()});
@@ -8227,7 +8253,7 @@ function PandaRoom({state,setState,streak,hero,fullView,onExitRoom,entryTalk,pau
               <div key={it.id} className={'items30-row'+(it.ok?' ok':'')}>
                 <span className="i30-ic">{it.ok?it.icon:'🔒'}</span>
                 <span className="i30-name">{tl(it,'name')}</span>
-                <span className="i30-sub">{it.ok?tl(it,'memory'):(it.future?t('room.future'):tl(it,'cond'))}</span>
+                <span className="i30-sub">{it.ok?tl(it,'memory'):(it.future?t('room.future'):(it.waiting?t('room.waiting'):tl(it,'cond')))}</span>
               </div>
             ))}
           </div>
@@ -9294,6 +9320,7 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
   const [reloadKey,setReloadKey]=useState(0);
   /* 【v50新規追加】ブロック状態 */
   const [blocked,setBlocked]=useState(()=>snsIsBlockedId(userId));
+  const [reportUserOpen,setReportUserOpen]=useState(false);
   const [blockAsk,setBlockAsk]=useState(false);
   const [blockBusy,setBlockBusy]=useState(false);
   const [blockErr,setBlockErr]=useState('');
@@ -9412,6 +9439,14 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
                   {blocked?t('legal.unblock'):t('legal.block')}
                 </button>
               )}
+              {!isMe&&me&&me!=='guest'&&(
+                <button type="button" onClick={()=>setReportUserOpen(true)}
+                  style={{marginTop:9,width:'100%',borderRadius:14,padding:'10px',fontSize:12,fontWeight:800,
+                          cursor:'pointer',fontFamily:'inherit',
+                          border:'1.5px solid #ecdcd4',background:'#fff',color:'#b9603f'}}>
+                  🚩 {t('legal.reportUser')}
+                </button>
+              )}
               {blockErr&&<div style={{fontSize:11.5,color:'#c2683f',marginTop:8}}>{blockErr}</div>}
               {err&&<div style={{fontSize:11.5,color:'#c2683f',marginTop:8}}>{err}</div>}
             </div>
@@ -9432,6 +9467,10 @@ function SnsUserScreen({userId,state,onClose,onOpenUser,showToast}){
           </>
         )}
       </div>
+      {reportUserOpen&&(
+        <ReportSheetV50 targetType="user" targetId={userId} me={me}
+          showToast={showToast} onClose={()=>setReportUserOpen(false)}/>
+      )}
       {/* 【v50新規追加】ブロック確認 */}
       {blockAsk&&(
         <ConfirmSheetV50

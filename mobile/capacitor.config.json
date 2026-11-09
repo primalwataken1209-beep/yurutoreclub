@@ -1,0 +1,16 @@
+{
+  "appId": "club.yurutore.app",
+  "appName": "ゆるトレ倶楽部 STG",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": []
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false
+  },
+  "ios": {
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}
