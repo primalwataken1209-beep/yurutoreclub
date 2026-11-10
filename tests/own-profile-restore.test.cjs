@@ -78,7 +78,9 @@ test('Google sign-in on a new device: Google name and picture are not used as de
   const g=await setup(t,{meta:GOOGLE,rows:{[ME]:{nickname:'ぱんだ',avatar_url:null}}});
   assert.equal(g.user().name,'ぱんだ');assert.equal(g.user().avatarUrl,null);
 });
-test('an explicit profile edit before the read returns is kept and written in full',async t=>{
+// 2026-11-10 (normal-image-fix): saving is now held until the own profile has been read, so the device defaults can never
+// overwrite it. Before, an edit made while the read was pending was written in full.
+test('a profile edit made before the read returns is not written; the read then fills the profile',async t=>{
   let release;const held=new Promise(r=>{release=r;});
   const s=await setup(t,{rows:{[ME]:{nickname:'server name'}},read:()=>held});
   s.button('プロフ').click();await settle(200);
@@ -86,10 +88,10 @@ test('an explicit profile edit before the read returns is kept and written in fu
   const input=s.w.document.querySelector('input.field');
   Object.getOwnPropertyDescriptor(s.w.HTMLInputElement.prototype,'value').set.call(input,'自分で決めた名前');input.dispatchEvent(new s.w.Event('input',{bubbles:true}));
   s.button('保存').click();await settle(300);
-  const full=s.upserts.find(x=>x.row.nickname==='自分で決めた名前'&&x.options===null);
-  assert.ok(full,'the edit is written: '+JSON.stringify(s.upserts));
+  assert.deepEqual(s.upserts,[],'nothing is written while the own profile is unread');
+  assert.match(s.w.document.body.textContent,/サーバーのプロフィールをまだ読み込めていないよ/);
   release();await settle();
-  assert.equal(s.user().name,'自分で決めた名前','a late read does not replace the edit');assert.equal(s.user().ytGuess,false);
+  assert.equal(s.user().name,'server name','the read fills the profile');assert.equal(s.user().ytGuess,undefined);
   assert.deepEqual(s.errors,[]);
 });
 test('switching accounts while the first read is pending: the late answer never reaches the other account',async t=>{

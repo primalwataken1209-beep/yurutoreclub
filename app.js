@@ -347,6 +347,9 @@ ja:{
     recent:'📝 最近の記録', logout:'ログアウト', photoChange:'📷 写真を変更', photoDelete:'画像を削除する',
     charsLeft:'あと{n}文字', publicAria:'公開設定', saving:'保存中…', save:'保存',
     since:'2024年2月から参加', private:'🔒 非公開', savedToast:'プロフィールを保存しました 🐼',
+    imgFail:'画像を保存できなかったよ。入力はそのままなので、もう一度保存してね🐼', syncFail:'プロフィールを保存できなかったよ。もう一度保存してね🐼',
+    partUp:'画像は送れたけど、プロフィールを保存できなかったよ。もう一度保存してね🐼', partDel:'画像は削除したけど、プロフィールを保存できなかったよ。もう一度保存してね🐼',
+    notLoaded:'サーバーのプロフィールをまだ読み込めていないよ。読み込んでから保存してね🐼', reload:'もう一度読み込む',
     editTitle:'プロフィール編集', editSub:'ぜんぶ任意だよ。埋めなくても大丈夫🐼'
   }
 },
@@ -632,6 +635,9 @@ en:{
     recent:'📝 Recent logs', logout:'Log out', photoChange:'📷 Change photo', photoDelete:'Remove photo',
     charsLeft:'{n} characters left', publicAria:'Profile visibility', saving:'Saving...', save:'Save',
     since:'Member since Feb 2024', private:'🔒 Private', savedToast:'Profile saved 🐼',
+    imgFail:"Couldn't save the photo. Your changes are still here, so please save again 🐼", syncFail:"Couldn't save your profile. Please save again 🐼",
+    partUp:"The photo was sent, but your profile wasn't saved. Please save again 🐼", partDel:"The photo was removed, but your profile wasn't saved. Please save again 🐼",
+    notLoaded:"Your profile hasn't loaded from the server yet. Load it before saving 🐼", reload:'Load again',
     editTitle:'Edit profile', editSub:'All optional. Leave anything blank 🐼'
   }
 }
@@ -2736,26 +2742,8 @@ async function removeAvatarFromSupabase(userId){
     return true;
   }catch(e){return false;}
 }
+// プロフィールをSupabaseのprofilesテーブルへ保存する処理は snsEnsureProfile(full) にまとめた（保存を待って結果を見る）
 
-// プロフィールをSupabaseのprofilesテーブルへ保存する（将来の他ユーザー表示用）。
-// テーブル未作成・未ログインでも失敗は静かに無視し、ローカル保存(saveSt)は必ず生きる。
-async function syncProfileToSupabase(userId,user){
-  try{
-    if(!supabaseClient||!userId||userId==='guest'||!user)return;
-    await supabaseClient.from('profiles').upsert({
-      id:userId,
-      nickname:user.name||'',
-      hitokoto:user.bio||'',
-      intro:user.intro||'',
-      avatar_url:user.avatarUrl||null,
-      fav_acts:user.favActs||[],
-      pace:user.pace||null,
-      region:user.region||null,
-      is_public:user.isPublic!==false,
-      updated_at:new Date().toISOString()
-    });
-  }catch(e){/* テーブル未作成などは無視（既存動作に影響させない） */}
-}
 
 
 const SNS_PAGE_SIZE=30;              // タイムライン1ページの件数
@@ -2971,6 +2959,7 @@ async function snsEnsureProfile(uid,user,opts){
       put('intro',user.intro,300);
       if(full||user.avatarUrl)row.avatar_url=user.avatarUrl||null;
       if(full||user.region)row.region=user.region||null;   // 都道府県まで。任意
+      if(full){row.fav_acts=user.favActs||[];row.pace=user.pace||null;row.is_public=user.isPublic!==false;}
     }
     const {error}=await supabaseClient.from('profiles').upsert(row,guess?{onConflict:'id',ignoreDuplicates:true}:undefined);
     if(error)throw error;
@@ -3140,7 +3129,8 @@ async function snsCreatePost(uid,{body,activityType,imageBlob},user){
   if(snsHasDangerPhrase(text))return {data:null,error:t('safety.blocked')};
   let imagePath=null;   /* 【v51.2】 */
   try{
-    await snsEnsureProfile(uid,user);   // プロフィール行が無いと外部キーで失敗するため
+    const pr=await snsEnsureProfile(uid,user);   // プロフィール行が無いと外部キーで失敗するため
+    if(pr.error)return {data:null,error:pr.error};
     /* 【v51.2】写真があるときは「写真を送る → 投稿を作る」の順。
        写真が送れなかったら投稿は作らない（写真なしの不完全な投稿を残さない）。 */
     if(imageBlob){
@@ -3705,12 +3695,6 @@ function AppLogic({devId}){
   const [forceAuthScreen,setForceAuthScreen]=useState(false);
   const [showWelcomeGate,setShowWelcomeGate]=useState(()=>{try{['yurutore_welcome_seen_v8_food','yurutore_welcome_seen_v9_food','yurutore_welcome_seen_v10_food','yurutore_welcome_seen_v12_gate'].forEach(k=>localStorage.removeItem(k));const force=(location.hash==='#welcome'||location.search.includes('welcome=1'));if(force){sessionStorage.removeItem('yurutore_welcome_seen_v13');return true;}return sessionStorage.getItem('yurutore_welcome_seen_v13')!=='1';}catch(e){return true;}});
 
-  /* 【v43.1】セッションの取得を1か所に集約する。
-     ・getSession()      … 画面を開いた時点のセッション（OAuthから戻った直後もここで拾える）
-     ・onAuthStateChange … そのあとのログイン/ログアウトを反映（OAuthの完了もここに来る）
-     どちらで来ても同じ setSession() に流し込むので、判定は常に session 1つで済む。
-     getSession() が失敗しても authChecked は必ず true にする。
-     （ここで止まると「読み込み中…」から進まなくなるため） */
   useEffect(()=>{
     let alive=true;
     if(!supabaseClient){setSt(DEF);setAuthChecked(true);return;}
@@ -3831,13 +3815,6 @@ function AppLogic({devId}){
     }
   };
 
-  // 【修正】ログイン処理。
-  // ・メール/パスワードの入力チェックを追加（validateAuthInputで一括チェック）
-  // ・呼び出し元(画面側)が「成功したかどうか」を判定できるよう、結果オブジェクトを返すようにした
-  //   → これにより「Supabaseで認証成功した場合のみホーム画面へ進む」を画面側で保証できる
-  // 【修正】ログイン処理。
-  // ・try / catch / finally 構造に変更 → 例外が発生してもローディングが必ず解除される
-  // ・authBusyRefで二重実行を防止
   const handleLogin=async(email,pass)=>{
     if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
@@ -3860,11 +3837,6 @@ function AppLogic({devId}){
     }
   };
 
-  // 【修正】新規登録処理。
-  // ・try / catch / finally 構造に変更 → 例外が発生しても「確認中…」のまま残らない
-  // ・authBusyRefで二重実行（登録ボタン連打）を防止
-  // ・成功して確認メールが必要な場合は awaitingConfirmationEmail をセットし、
-  //   確認メール待ち専用画面（ConfirmEmailScreen）へ切り替える
   const handleRegister=async(email,pass)=>{
     if(authBusyRef.current)return{success:false}; // 連打防止：処理中なら何もしない
     setAuthError('');
@@ -3957,11 +3929,6 @@ function AppLogic({devId}){
     try{
       authBusyRef.current=true;
       setAuthLoading(true);
-      /* 【v43.1】戻り先を本番URLに固定する（authRedirectTo）。
-         Supabaseの Authentication → URL Configuration の Redirect URLs にも
-         https://yurutore-club.netlify.app/ を登録しておくこと。
-         戻ってきたら onAuthStateChange / getSession がセッションを拾い、
-         そのままホーム画面へ進む（下の「画面の入口」判定を参照）。 */
       const {error}=await supabaseClient.auth.signInWithOAuth({
         provider:'google',
         options:{redirectTo:authRedirectTo()}
@@ -3975,24 +3942,6 @@ function AppLogic({devId}){
     }
   };
 
-  /* 【v43.1修正】ログアウトしたら必ずウェルカム／認証画面へ戻す。
-
-     ＜v43までの不具合＞
-       setSt(s=>({...DEF, user:s?.user||null, onboard:!!s?.onboard}))
-       のように user と onboard を残していたため、
-       ログアウト後も「プロフィールがある＝オンボード済み」と判定され、
-       認証画面に戻らずホーム画面（体験版扱い）のままになっていた。
-       PCではその外側にデバイスプレビューの枠が見えるため、
-       「ログアウトするとデバイスプレビューに飛ぶ」ように見えていた。
-
-     ＜修正後＞
-       ・Supabaseのセッションを破棄
-       ・画面の状態を初期値に戻す（user / onboard も残さない）
-       ・ウェルカムゲートをもう一度表示する
-       ・forceAuthScreen を立てて、guestバケットに古いデータが残っていても
-         ホームへ素通りしないようにする
-     ※ ログアウトしても、ユーザーIDごとの保存データ（記録・家具・ポイント）は
-        消していません。次にログインすれば元どおり戻ります。 */
   const handleLogout=async()=>{
     try{ if(supabaseClient)await supabaseClient.auth.signOut(); }catch(e){}
     setSession(null);
@@ -4038,15 +3987,6 @@ function AppLogic({devId}){
 
   const closeWelcomeGate=()=>{try{sessionStorage.setItem('yurutore_welcome_seen_v13','1');}catch(e){};setShowWelcomeGate(false);};
 
-  // 【重要修正】画面判定の順序を変更しました。
-  // 以前は「WelcomeGate → 確認メール画面」の順で判定していたため、
-  // WelcomeGateから新規登録した場合、確認メール待ち状態になっても
-  // WelcomeGateが表示され続け、「確認中…」のまま止まったように見えるバグがありました。
-  // → 確認メール待ちの判定を"最優先"に移動。どの画面から登録しても必ず
-  //   「確認メールを送信しました」画面へ切り替わります。
-  // ・新規登録直後（awaitingConfirmationEmail）
-  // ・すでにSupabaseのセッションはあるが、メール未確認（email_confirmed_atが無い）の場合
-  //   ※ Googleログインなどメール以外のプロバイダーはメール確認不要のため対象外
   const isEmailProviderUser=session?.user?.app_metadata?.provider==='email'||(session?.user?.app_metadata?.providers||[]).includes('email');
   const needsEmailVerification=!!session&&isEmailProviderUser&&!session.user.email_confirmed_at;
   if(awaitingConfirmationEmail||needsEmailVerification){
@@ -4093,11 +4033,6 @@ function AppLogic({devId}){
     if(showAuthFlow)return<RegisterScreen onDone={u=>{if(!isSignedIn)ytResetGuestRoomIfFresh(st);setForceAuthScreen(false);setSt(s=>({...s,user:u,onboard:true}));}} onLogin={handleLogin} onRegister={handleRegister} onGoogleLogin={handleGoogleLogin} onResetPassword={handlePasswordReset} authLoading={authLoading} authError={authError} authNotice={authNotice} hasSession={!!session}/>;
   }
 
-  /* 【v43.1】ログインが成立した直後の“ひと呼吸”。
-     セッションが入った瞬間はまだ端末のプロフィール読み込み（loadSt）が終わっていない。
-     そのままホームを描くと state.user が null のまま参照されて画面が落ちるため、
-     プロフィールがそろうまでは読み込み表示にする。上の useEffect が
-     セッションからプロフィールを用意し次第、自動でホームへ進む。 */
   if(isSignedIn&&!hasProfile)return<div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',color:'#4DB89E',fontSize:13}}>{t('msg.loading')}</div>;
   if(praise)return<PraiseScreen praise={praise} state={st} onHome={()=>{setPraise(null);setTab('home');}} onTL={()=>{const rep=(st.reports||[]).find(r=>r.id===praise.reportId);setSt(s=>({...s,posted:[...(s.posted||[]),praise.reportId]}));setPraise(null);setTab('timeline');/* 【v51.2】保存済みの記録をそのまま投稿し、結果を知らせる */if(rep&&rep.photo&&st.auth&&st.auth!=='guest')showToast(t('sns.posting'));publishToSns(rep).then(ok=>{if(ok)showToast(t('sns.postedTL'));});}} onRoom={()=>{setPraise(null);setTab('home');setRoomJump(Date.now());}}/>;
 
@@ -9700,7 +9635,10 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
   const [region,setRegion]=useState(state.user.region||'未設定');   // 居住地域（任意）
   const [isPublic,setIsPublic]=useState(state.user.isPublic!==false); // 公開設定（初期値：公開）
   const [avatarErr,setAvatarErr]=useState('');
+  const [avatarOp,setAvatarOp]=useState('keep');   // keep | replace | remove: what the user did to the photo
+  const shown=useAvatarSrc(state.user.avatarUrl||null,state.user.avatar||null);   // device photo, or own Storage photo via the private read
   const [saving,setSaving]=useState(false);
+  const busy=useRef(false);   // blocks a second tap before the re-render
   const avatarFileRef=useRef(null);
   const total=state.reports.length;
   const streak=calcStreak(state.reports);
@@ -9713,7 +9651,7 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
     setIntro(state.user.intro||'');setAvatar(state.user.avatar||null);
     setFavActs(state.user.favActs||[]);setPace(state.user.pace||'');
     setRegion(state.user.region||'未設定');setIsPublic(state.user.isPublic!==false);
-    setAvatarErr('');setEditing(true);
+    setAvatarErr('');setAvatarOp('keep');setEditing(true);
   };
 
   // プロフィール画像の選択（スマホの写真フォルダから選択 → 正方形トリミング＆圧縮）
@@ -9721,48 +9659,52 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
     const file=e.target.files&&e.target.files[0];
     if(!file)return;
     setAvatarErr('');
-    try{setAvatar(await readAvatarFile(file));}
+    try{setAvatar(await readAvatarFile(file));setAvatarOp('replace');}
     catch(err){setAvatarErr(err.message||t('photo.avatarErr'));}
     finally{if(avatarFileRef.current)avatarFileRef.current.value='';}
   };
 
   const toggleFav=(id)=>setFavActs(list=>list.includes(id)?list.filter(x=>x!==id):[...list,id]);
 
-  // 保存処理：ローカル保存は必ず成功させ、Supabase(Storage/profiles)は可能なら同期する
+  /* Signed in: profile row ready → photo (only on an explicit replace/remove) → awaited profile save → success.
+     A failure keeps the form open and the device profile as it was; a partial success says so. Guests save on the device only. */
   const save=async()=>{
-    if(!name.trim()||saving)return;
-    setSaving(true);
+    if(!name.trim()||busy.current)return;
+    const uid=state.auth,online=!!(supabaseClient&&uid&&uid!=='guest');
+    if(online&&state.user.ytGuess===true){setAvatarErr(t('profile.notLoaded'));return;}   // never overwrite an unread server profile
+    busy.current=true;setSaving(true);setAvatarErr('');
     try{
-      let avatarUrl=state.user.avatarUrl||null;
-      const avatarChanged=avatar!==state.user.avatar;
-      if(avatarChanged&&avatar){
-        // ログイン中ならSupabase Storageへアップロード（失敗してもdataURLで表示継続）
-        avatarUrl=await uploadAvatarToSupabase(state.auth,avatar);
-      }else if(!avatar){
-        // 【v51.4.7】画像を消したときは Storage のファイルも削除する。失敗したら保存しない（再試行できる）。
-        if((state.user.avatar||state.user.avatarUrl)&&!(await removeAvatarFromSupabase(state.auth))){
-          setAvatarErr(t('photo.saveErr'));
-          return;
-        }
-        avatarUrl=null;
+      let avatarUrl=state.user.avatarUrl||null,av=state.user.avatar||null,part='';
+      if(online){
+        const {error}=await supabaseClient.from('profiles').upsert({id:uid},{onConflict:'id',ignoreDuplicates:true});
+        if(error){setAvatarErr(t('profile.syncFail'));return;}
       }
-      const nextUser={...state.user,
-        name:name.trim(),bio:bio.trim(),intro:intro.trim(),
-        avatar:avatar||null,avatarUrl,
-        favActs,pace:pace||null,
-        region:region==='未設定'?null:region,
-        isPublic,ytGuess:false};
-      setState(s=>({...s,user:nextUser}));
-      syncProfileToSupabase(state.auth,nextUser); // profilesテーブルへも同期（未作成なら無視）
-      snsEnsureProfile(state.auth,nextUser,{full:true}); // 【v43】SNS表示用の列(nickname/intro/region等)も更新（消した項目も反映）
-      setEditing(false);
+      if(avatarOp==='replace'){
+        if(online){avatarUrl=await uploadAvatarToSupabase(uid,avatar);if(!avatarUrl){setAvatarErr(t('profile.imgFail'));return;}part='partUp';}
+        av=avatar;
+      }else if(avatarOp==='remove'){
+        if(online){if(!(await removeAvatarFromSupabase(uid))){setAvatarErr(t('photo.saveErr'));return;}part='partDel';}
+        av=null;avatarUrl=null;
+      }
+      const nextUser={...state.user,name:name.trim(),bio:bio.trim(),intro:intro.trim(),avatar:av,avatarUrl,
+        favActs,pace:pace||null,region:region==='未設定'?null:region,isPublic,ytGuess:false};
+      if(online&&(await snsEnsureProfile(uid,nextUser,{full:true})).error){setAvatarErr(t('profile.'+(part||'syncFail')));return;}
+      setState(s=>s.auth===uid?{...s,user:nextUser}:s);
+      setEditing(false);setAvatarOp('keep');
       showToast(t('profile.savedToast'));
     }catch(e){
       setAvatarErr(t('photo.saveErr'));
     }finally{
-      setSaving(false); // エラー時もローディング状態を必ず解除
+      busy.current=false;setSaving(false);
     }
   };
+  const reload=async()=>{
+    const uid=state.auth,p=await ytLoadOwnProfile(uid);
+    if(!p){setAvatarErr(t('profile.notLoaded'));return;}
+    setState(s=>(s.auth===uid&&s.user&&s.user.ytGuess)?{...s,user:ytMergeOwnProfile(s.user,p.row)}:s);
+    setAvatarErr('');setEditing(false);
+  };
+  const preview=avatarOp==='replace'?avatar:avatarOp==='remove'?null:shown;
 
   /* 【v50新規追加】アカウント削除の実行（最終確認からのみ呼ばれる） */
   const runDelete=async()=>{
@@ -9785,14 +9727,15 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
 
         {/* プロフィール画像（丸型プレビュー） */}
         <div className="pf-avatar-wrap">
-          {avatar
-            ?<img src={avatar} className="pf-avatar" alt={t('alt.avatar')}/>
+          {preview
+            ?<img src={preview} className="pf-avatar" alt={t('alt.avatar')}/>
             :<div className="pf-avatar-fallback">{name.trim()?name.trim()[0]:'🐼'}</div>}
           <button type="button" className="pf-avatar-btn" onClick={()=>avatarFileRef.current&&avatarFileRef.current.click()}>{t('profile.photoChange')}</button>
-          {avatar&&<button type="button" className="pf-avatar-del" onClick={()=>{setAvatar(null);setAvatarErr('');}}>{t('profile.photoDelete')}</button>}
+          {preview&&<button type="button" className="pf-avatar-del" onClick={()=>{setAvatar(null);setAvatarOp('remove');setAvatarErr('');}}>{t('profile.photoDelete')}</button>}
           <input ref={avatarFileRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{display:'none'}} onChange={pickAvatar}/>
         </div>
         {avatarErr&&<div className="pf-err">{avatarErr}</div>}
+        {state.user.ytGuess===true&&state.auth!=='guest'&&<button type="button" className="btn-ghost" onClick={reload}>{t('profile.reload')}</button>}
 
         <label className="lbl">{t('profile.nick')}</label>
         <input className="field" style={{marginBottom:11}} value={name} onChange={e=>setName(e.target.value)} maxLength={20}/>
@@ -9838,8 +9781,8 @@ function ProfileScreen({state,setState,showToast,onLogout,onDeleteAccount}){
       <PH msg={t('ui.pfHeadMsg')} sub={t('ui.pfHeadSub')} pct={pct}/>
       <div style={{padding:'14px 13px 0',textAlign:'center'}}>
         {/* 【v25変更】プロフィール画像があれば丸型で表示、なければ従来のイニシャル表示 */}
-        {state.user.avatar
-          ?<img src={state.user.avatar} alt={t('alt.avatar')} style={{width:88,height:88,borderRadius:'50%',objectFit:'cover',margin:'0 auto 9px',display:'block',boxShadow:'0 8px 24px rgba(77,184,158,0.38)',border:'3px solid #fff'}}/>
+        {shown
+          ?<img src={shown} alt={t('alt.avatar')} style={{width:88,height:88,borderRadius:'50%',objectFit:'cover',margin:'0 auto 9px',display:'block',boxShadow:'0 8px 24px rgba(77,184,158,0.38)',border:'3px solid #fff'}}/>
           :<div style={{width:88,height:88,borderRadius:'50%',background:'linear-gradient(145deg,#5DCBA8,#3da888)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:34,fontWeight:700,color:'white',margin:'0 auto 9px',boxShadow:'0 8px 24px rgba(77,184,158,0.38)'}}>{state.user.name[0]}</div>}
         <div style={{fontSize:20,fontWeight:800,color:'#1a4038'}}>{state.user.name}</div>
         {since>0&&<div style={{fontSize:11,color:'#7aada0',marginTop:2}}>{t('profile.since')}</div>}
