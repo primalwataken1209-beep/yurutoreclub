@@ -57,7 +57,7 @@ async function setup(t,{rows={},signedIn=true,lang='ja',readError=false}={}){
   const writes=()=>calls.filter(c=>['prep','full','ensure','insertOnly','upload','remove','post'].includes(c[0]));
   const switchTo=async id=>{w.__session=mk(id);onAuth('SIGNED_IN',mk(id));await settle(400);};
   return {w,doc,ctl,calls,errors,button,click,type,user,nameInput,pickPhoto,openEditor,writes,switchTo,
-    text:()=>doc.body.textContent,toast:()=>(doc.querySelector('.toast')||{}).textContent||''};
+    text:()=>doc.getElementById('root').textContent,toast:()=>(doc.querySelector('.toast')||{}).textContent||''};
 }
 const SERVER={nickname:'ゆるパンダ',hitokoto:'のんびり',intro:'歩くのが好き',avatar_url:REF,fav_acts:['walk'],pace:null,region:'東京都',is_public:true};
 
