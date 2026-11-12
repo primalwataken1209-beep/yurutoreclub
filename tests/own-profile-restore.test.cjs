@@ -78,18 +78,26 @@ test('Google sign-in on a new device: Google name and picture are not used as de
   const g=await setup(t,{meta:GOOGLE,rows:{[ME]:{nickname:'ぱんだ',avatar_url:null}}});
   assert.equal(g.user().name,'ぱんだ');assert.equal(g.user().avatarUrl,null);
 });
-test('an explicit profile edit before the read returns is kept and written in full',async t=>{
-  let release;const held=new Promise(r=>{release=r;});
-  const s=await setup(t,{rows:{[ME]:{nickname:'server name'}},read:()=>held});
+test('an explicit profile edit after a delayed read saves the chosen name and preserves server fields',async t=>{
+  let release;const held=new Promise(r=>{release=r;});t.after(()=>release());
+  const row={nickname:'server name',hitokoto:'server bio',intro:'server intro',avatar_url:null,fav_acts:['walk'],pace:'weekly',region:'東京都',is_public:false};
+  const s=await setup(t,{rows:{[ME]:row},read:()=>held});
+  assert.equal(s.upserts.length,0,'waiting for the read must not automatically write device defaults');
+  release();await settle();
+  assert.equal(s.user().name,'server name');assert.equal(s.user().ytGuess,undefined);
   s.button('プロフ').click();await settle(200);
   s.button('編集').click();await settle(200);
   const input=s.w.document.querySelector('input.field');
+  assert.ok(input,'profile editor is open');
   Object.getOwnPropertyDescriptor(s.w.HTMLInputElement.prototype,'value').set.call(input,'自分で決めた名前');input.dispatchEvent(new s.w.Event('input',{bubbles:true}));
-  s.button('保存').click();await settle(300);
-  const full=s.upserts.find(x=>x.row.nickname==='自分で決めた名前'&&x.options===null);
-  assert.ok(full,'the edit is written: '+JSON.stringify(s.upserts));
-  release();await settle();
-  assert.equal(s.user().name,'自分で決めた名前','a late read does not replace the edit');assert.equal(s.user().ytGuess,false);
+  s.button('保存').click();await settle(400);
+  const writes=s.upserts.filter(x=>x.options===null&&Object.hasOwn(x.row,'is_public'));
+  for(const write of s.upserts)if(Object.hasOwn(write.row,'nickname'))assert.equal(write.row.nickname,'自分で決めた名前','no stale nickname is sent');
+  assert.equal(writes.length,1,'one complete profile save');
+  const {updated_at,...saved}=writes[0].row;
+  assert.ok(Number.isFinite(Date.parse(updated_at)),'save includes a valid update timestamp');
+  assert.deepEqual(saved,{id:ME,...row,nickname:'自分で決めた名前'});
+  assert.equal(s.user().name,'自分で決めた名前');assert.equal(s.user().ytGuess,false);
   assert.deepEqual(s.errors,[]);
 });
 test('switching accounts while the first read is pending: the late answer never reaches the other account',async t=>{
