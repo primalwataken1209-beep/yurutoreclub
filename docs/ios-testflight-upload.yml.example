@@ -1,0 +1,95 @@
+name: iOS staging Apple upload (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: 'Type UPLOAD_STAGING_ONLY after owner approval'
+        required: true
+        type: string
+      distribution_reviewed:
+        description: 'Existing TestFlight automatic distribution reviewed and disabled'
+        required: true
+        type: boolean
+        default: false
+      reviewed_sha:
+        description: 'Full reviewed commit SHA of claude/store-release-prep'
+        required: true
+        type: string
+      staging_publishable_key:
+        description: 'Real staging sb_publishable_ key; no secret/service role key'
+        required: true
+        type: string
+      build_number:
+        description: 'Unused positive iOS build number; check App Store Connect first'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-signing
+  cancel-in-progress: false
+
+jobs:
+  staging-upload:
+    if: github.ref == 'refs/heads/claude/store-release-prep' && inputs.reviewed_sha == github.sha && inputs.approval == 'UPLOAD_STAGING_ONLY' && inputs.distribution_reviewed
+    environment: ios-signing
+    runs-on: macos-26
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    steps:
+      - name: Validate manual inputs before repository code
+        working-directory: .
+        env:
+          KEY: ${{ inputs.staging_publishable_key }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          echo "::add-mask::$KEY"
+          [[ "$KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{10,200}$ ]]
+          [[ "$KEY" != *CI_COMPILE_ONLY* ]]
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]{0,8}$ ]]
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REVIEWED_SHA" == "$GITHUB_SHA" ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: python3 -m unittest discover -s tests -p 'test_ios*.py'
+      - name: Build actual staging assets
+        env:
+          YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+        run: |
+          node scripts/check-staging-key.cjs
+          node scripts/build-mobile.cjs --target=staging
+          npx --no-install cap sync ios
+      - name: Resolve Swift dependencies before loading credentials
+        run: |
+          xcodebuild -version
+          xcodebuild -resolvePackageDependencies -project ios/App/App.xcodeproj -scheme App
+      - name: Verify staging IPA, validate with Apple and upload
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+          YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+          YT_UPLOAD_APPROVAL: ${{ inputs.approval }}
+          YT_DISTRIBUTION_REVIEWED: ${{ inputs.distribution_reviewed }}
+          YT_REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          IOS_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: python3 scripts/ios_testflight_upload.py --upload
+      # No upload-artifact: an IPA contains the embedded provisioning profile.
+      # No tester invitation, beta review submission, group assignment or store release.
