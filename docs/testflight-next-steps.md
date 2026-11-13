@@ -1,4 +1,4 @@
-# TestFlight upload preparation ? inactive draft
+# TestFlight upload preparation - awaiting owner approval
 
 ## Verified baseline
 
@@ -8,10 +8,18 @@ verification passed on hosted macOS, commit
 Evidence: https://github.com/primalwataken1209-beep/yurutoreclub/actions/runs/43432347296
 The IPA was discarded. This is not an App Store Connect upload or device test.
 
-This draft adds an explicit upload entry point and an INACTIVE workflow template
-under docs, not .github/workflows. The existing signing-only workflow still uploads
+This draft adds an explicit upload entry point and a manual-only workflow.
+The workflow requires registration on main through a separate workflow-only PR;
+that merge and the first Apple upload are awaiting explicit owner approval. The existing signing-only workflow still uploads
 nothing. Local synthetic tests cover approval gates, digest mismatch, validation
 failure, credential isolation and temporary key cleanup. Apple upload is untested.
+
+## Credential preparation status
+
+2026-11-13: owner-authorized Developer team key created. All three ASC secret
+names were verified in the protected ios-signing environment, alongside the three
+signing secrets. Key validity will be checked during Apple validation. Do not
+create another key or repeat authorization. No Apple upload has occurred.
 
 ## Ordered remaining work
 

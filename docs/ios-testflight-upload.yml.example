@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  signing-check:
+  staging-upload:
     if: github.ref == 'refs/heads/claude/store-release-prep' && inputs.reviewed_sha == github.sha && inputs.approval == 'UPLOAD_STAGING_ONLY' && inputs.distribution_reviewed
     environment: ios-signing
     runs-on: macos-26
@@ -93,4 +93,3 @@ jobs:
         run: python3 scripts/ios_testflight_upload.py --upload
       # No upload-artifact: an IPA contains the embedded provisioning profile.
       # No tester invitation, beta review submission, group assignment or store release.
-
