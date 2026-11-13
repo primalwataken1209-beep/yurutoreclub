@@ -172,7 +172,9 @@ def main():
         apps = list((unpack / 'Payload').glob('*.app'))
         require(len(apps) == 1, 'Expected exactly one app')
         app = apps[0]
+        print('Verifying exported code signature.', flush=True)
         run(['codesign', '--verify', '--deep', '--strict', app], child_env)
+        print('Inspecting signed entitlements.', flush=True)
         ent = plistlib.loads(run(['codesign', '-d', '--entitlements', ':-', app], child_env))
         require(ent.get('application-identifier') == team + '.' + APP
                 and ent.get('com.apple.developer.team-identifier') == team
@@ -180,7 +182,9 @@ def main():
         embedded = plistlib.loads(run(['security', 'cms', '-D', '-i', app / 'embedded.mobileprovision'], child_env))
         require(validate_profile(embedded) == team and embedded['UUID'] == uuid, 'Wrong embedded profile')
         prefix = root / 'leaf'
-        run(['codesign', '-d', '--extract-certificates', prefix, app], child_env)
+        print('Extracting signing certificate for comparison.', flush=True)
+        # Optional long-option values must use =; otherwise prefix is a code path.
+        run(['codesign', '-d', '--extract-certificates=' + str(prefix), app], child_env)
         require(Path(str(prefix) + '0').read_bytes() in p['DeveloperCertificates'], 'Wrong signing certificate')
         info = plistlib.loads((app / 'Info.plist').read_bytes())
         require(info.get('CFBundleIdentifier') == APP and info.get('CFBundleVersion') == build,
@@ -221,3 +225,4 @@ if __name__ == '__main__':
         print('Signing check failed: ' + (str(error) if isinstance(error, (ValueError, RuntimeError))
               else type(error).__name__), file=sys.stderr)
         sys.exit(1)
+
