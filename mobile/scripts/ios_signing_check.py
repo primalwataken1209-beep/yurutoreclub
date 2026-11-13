@@ -92,7 +92,7 @@ def run(args, env, **kwargs):
     return result.stdout
 
 
-def main():
+def main(verified_ipa_callback=None):
     require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true',
             'GitHub-hosted macOS runner required')
     require(os.environ.get('GITHUB_REF') == 'refs/heads/claude/store-release-prep', 'Wrong branch')
@@ -199,10 +199,14 @@ def main():
         digest = hashlib.sha256(ipas[0].read_bytes()).hexdigest()
         summary = ('iOS staging signing/export verification passed.\n\n'
                    f'Commit: {os.environ["GITHUB_SHA"]}\n\nBuild: {build}\n\nIPA SHA256: {digest}\n\n'
-                   'No upload or distribution. IPA and signing files removed after validation.\n')
+                   + ('No upload or distribution.\n' if verified_ipa_callback is None
+                      else 'Upload outcome is reported separately below.\n')
+                   + 'IPA and signing files removed when this job finishes.\n')
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
             f.write(summary)
-        print('Signature, profile, ID, staging assets and privacy checks passed. No upload.')
+        print('Signature, profile, ID, staging assets and privacy checks passed.')
+        if verified_ipa_callback is not None:
+            verified_ipa_callback(ipas[0], digest)
     finally:
         if old_chains is not None:
             subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *old_chains],
