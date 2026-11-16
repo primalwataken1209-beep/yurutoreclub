@@ -99,7 +99,7 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   source=once(source,"            onGoogleLogin();\n          }}>{t('auth.google')}</button>",
     "            onGoogleLogin();\n          }}>{t('auth.google')}</button>\n"+
     "          {window.YT_NATIVE.appleEnabled&&<button type=\"button\" className=\"yt-apple-signin\" disabled={authLoading} onClick={()=>{\n"+
-    "            if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}\n"+
+    "            if(!age13){setLocalError(t('legal.age13Need'));return;}\n"+
     "            onGoogleLogin('apple');\n"+
     "          }}>{window.YT_NATIVE.text('apple')}</button>}",'apple button',2);
   // The record screen waits until the new record is committed to the device file; a failure is not praised.

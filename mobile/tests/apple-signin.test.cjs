@@ -44,6 +44,7 @@ test('Apple sign-up keeps the 13+ check, then opens the PKCE browser flow with t
 test('a failure to start Apple sign-in shows an Apple message, not the Google one',async t=>{
   const s=await signInScreen(t,{platform:'ios',apple:true});
   await s.click('ログイン');
+  [...s.w.document.querySelectorAll('input[type=checkbox]')][0].click();await settle();
   s.w.capacitorBrowser.Browser.open=async()=>{throw new Error('no browser');};
   appleButton(s).click();await settle(300);
   const text=s.w.document.getElementById('root').textContent;
