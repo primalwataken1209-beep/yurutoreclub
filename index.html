@@ -6138,7 +6138,7 @@ function ConfirmEmailScreen({email,loading,error,notice,onResend,onBackToLogin})
    ウェルカム画面と、パンダルームの設定から呼ぶ小さな切替。
    押した瞬間に ytSetLang() が全画面へ通知するので、リロードは不要。 */
 /* ═══════════════ 【v50新規追加】登録時の必要最低限の同意表示 ═══════════════
-   ・「私は13歳以上です」のチェック（新規登録のときだけ表示）
+   ・「私は13歳以上です」のチェック（新規登録と、ログイン側のGoogleボタンの上に表示）
    ・「登録することで、利用規約およびプライバシーポリシーに同意します。」
    生年月日・年齢の数値は取得も保存もしない。プロフィール項目も増やしていない。
    リンクは新しいタブで開く（アプリの状態を壊さないため）。 */
@@ -6350,9 +6350,10 @@ function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPasswor
             <div style={{flex:1,height:1,background:'#dceee8'}}/><span style={{fontSize:11,color:'#b0c8c0'}}>{t('common.or')}</span>
             <div style={{flex:1,height:1,background:'#dceee8'}}/>
           </div>
+          {mode==='login'&&<AgeConfirmRow checked={age13} onChange={v=>{setAge13(v);setLocalError('');}}/>}
           <button className="yg8-secondary" disabled={authLoading} onClick={()=>{
-            /* 【v50】新規登録タブからGoogleで始める場合も、13歳以上の確認を必須にする */
-            if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}
+            /* 【v51.5】Googleはログインのタブからも新規登録になりうる。OAuth開始前にどちらのタブでも13歳以上を確認する */
+            if(!age13){setLocalError(t('legal.age13Need'));return;}
             onGoogleLogin();
           }}>{t('auth.google')}</button>
         </>}
@@ -6485,9 +6486,10 @@ function RegisterScreen({onDone,onLogin,onRegister,onGoogleLogin,onResetPassword
             <div style={{flex:1,height:1,background:'#dceee8'}}/><span style={{fontSize:11,color:'#b0c8c0'}}>{t('common.or')}</span>
             <div style={{flex:1,height:1,background:'#dceee8'}}/>
           </div>
+          {mode==='login'&&<AgeConfirmRow checked={age13} onChange={v=>{setAge13(v);setLocalError('');}}/>}
           <button className="welcome-sub-btn" disabled={authLoading} onClick={()=>{
-            /* 【v50】新規登録タブからGoogleで始める場合も、13歳以上の確認を必須にする */
-            if(mode==='register'&&!age13){setLocalError(t('legal.age13Need'));return;}
+            /* 【v51.5】Googleはログインのタブからも新規登録になりうる。OAuth開始前にどちらのタブでも13歳以上を確認する */
+            if(!age13){setLocalError(t('legal.age13Need'));return;}
             onGoogleLogin();
           }}>{t('auth.google')}</button>
         </>}
