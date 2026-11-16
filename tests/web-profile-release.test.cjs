@@ -5,12 +5,18 @@ const fs=require('node:fs');
 const app=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','utf8');
 const privacy=fs.readFileSync('privacy/index.html','utf8'),deletion=fs.readFileSync('account-deletion/index.html','utf8');
 const block=(page,lang)=>{const m=new RegExp(`<section data-lang-block="${lang}">([\\s\\S]*?)</section>`).exec(page);assert.ok(m,lang);return m[1];};
-// Two accepted states, each checked strictly; the code decides which one applies and the policy text must match that code.
-//   OLD (current main): the owner's own screens load an external (Google) picture URL; policy revised 2026-11-05.
-//   NEW (Android 1.0.7 candidate): no screen loads external picture URLs (ytSafeLocalImg); policy revised 2026-11-16 with
-//     version-specific wording, the session identifier and the infrastructure connection records.
+// The code and the policy text are each in one of two states, checked strictly:
+//   code OLD (web, current main): the owner's own screens load an external (Google) picture URL.
+//   code NEW (Android 1.0.7): no screen loads external picture URLs (ytSafeLocalImg).
+//   text LEGACY: owner-load wording only; revised 2026-11-05.
+//   text VERSIONED: Android 1.0.7+ does not load, Android 1.0.6 and earlier and the web version do; session identifier and
+//     infrastructure connection records; revised 2026-11-16.
+// Accepted pairs: OLD+LEGACY, OLD+VERSIONED (the versioned text describes the web version as loading, which is what OLD does),
+// NEW+VERSIONED. NEW+LEGACY is rejected.
 const NEW=/\nfunction ytSafeLocalImg\(v\)\{/.test(app);
-const REVISED=NEW?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+const VERSIONED=/Android アプリのバージョン 1\.0\.7 以降|Android app version 1\.0\.7 and later/.test(privacy);
+const REVISED=VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+test('privacy text state fits the code: new code needs the version-specific policy',()=>{assert.ok(VERSIONED||!NEW,'NEW code with LEGACY policy text');});
 
 test('production project only: no staging project, no mobile build hooks in the web source',()=>{
   for(const text of [app,html]){
@@ -63,7 +69,8 @@ test('the code matches: mood, chats and time capsules are part of the synced sta
   assert.match(app,/if\(!userId\|\|userId==='guest'\)return; \/\/ 体験版（未ログイン）は同期しない/);
   assert.match(app,/function pandaChatReply\(text,type\)\{\n  const cat=pandaChatCategory\(text,type\);\n  return pickPandaChatReply\(cat\);/);
 });
-// External (Google) images: other members' screens never load them. OLD: the owner's own screens do. NEW: nobody's screen does.
+// External (Google) images: other members' screens never load them. OLD code: the owner's own screens do. NEW code: nobody's screen does.
+// The policy part checks the text state (VERSIONED or LEGACY); which pairs are allowed is checked by the first privacy test.
 test('the code matches: an external Google image is never loaded for other members, and the owner case matches the policy',()=>{
   const {functions}=require('./helpers.cjs');
   const c=functions(['avatarRefFromValue','selfAvatarLocal',...(NEW?['ytSafeLocalImg']:[])],{SUPABASE_URL:'https://eszheiabjwehcbrteqza.supabase.co',
@@ -89,8 +96,11 @@ test('the code matches: an external Google image is never loaded for other membe
   const oldJa=/端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合/,oldEn=/If the copy of your own profile on a device holds the URL of your Google profile picture/;
   const newJa=/Android アプリのバージョン 1\.0\.7 以降は、この URL の画像を読み込まず、既定のアイコンを表示します（URL の値は削除しません。新しい写真を選ぶと置き換わります）/;
   const newEn=/Android app version 1\.0\.7 and later does not load an image from that URL and shows the default icon instead \(the URL value is not deleted; choosing a new photo replaces it\)/;
-  if(NEW){
+  if(VERSIONED){
+    // Valid for the web code (OLD: it loads, as the web sentence says) and for Android 1.0.7 (NEW: it does not, as the 1.0.7 sentence says).
     assert.match(ja,newJa);assert.match(en,newEn);
+    assert.equal(/Web 版[^。]*読み込みません|Web 版[^。]*読み込まず/.test(ja),false,'the web version is not described as not loading');
+    assert.equal(/web version[^.]*(does not|doesn't|never) load/i.test(en),false,'the web version is not described as not loading');
     assert.match(ja,/Android アプリのバージョン 1\.0\.6 以前と Web 版では、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます/);
     assert.match(en,/In Android app version 1\.0\.6 and earlier and in the web version, the device loads that image from Google's servers when it shows your own posts or your own community profile screen/);
     assert.match(ja,/他の利用者の画面では、どのバージョンでも外部の URL の画像は読み込まれず/);assert.match(en,/In every version, other members' screens do not load images from outside URLs/);
@@ -102,7 +112,7 @@ test('the code matches: an external Google image is never loaded for other membe
     assert.match(ja,oldJa);assert.match(en,oldEn);
     assert.match(ja,/ご自身の投稿やご自身の SNS プロフィール画面を表示するときに/);assert.match(ja,/他の利用者の画面では、外部の URL の画像は読み込まれず/);
     assert.match(en,/when it shows your own posts or your own community profile screen/);assert.match(en,/Other members' screens do not load images from outside URLs/);
-    assert.equal(newJa.test(privacy)||newEn.test(privacy),false,'no wording for a version this code is not');
+    assert.equal(newJa.test(privacy)||newEn.test(privacy),false,'legacy text has no version-specific wording');
   }
   assert.equal(/ご自身の画面でだけ表示され|shown only on your own screen/.test(privacy),false);
 });
