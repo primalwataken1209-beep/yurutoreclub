@@ -7,10 +7,9 @@ begin;
 do $guard$
 begin
   if to_regclass('yt_private.account_deletion_jobs') is not null
-     and exists (select 1 from yt_private.account_deletion_jobs
-                  where state <> 'AWAITING_ASSURANCE' or hold_until is null or hold_until > now())
+     and exists (select 1 from yt_private.account_deletion_jobs)
      and coalesce(current_setting('yt.rollback_reopens_pending_users', true), '') <> 'acknowledged' then
-    raise exception 'unfinished or held deletion jobs exist; rolling back lets those users write again. Finish them first, or set yt.rollback_reopens_pending_users = acknowledged in this session after approval';
+    raise exception 'deletion jobs exist; rolling back lets those users write again with still-valid tokens. Set yt.rollback_reopens_pending_users = acknowledged in this session only after approval';
   end if;
 end
 $guard$;

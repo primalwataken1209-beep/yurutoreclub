@@ -44,7 +44,9 @@ create table if not exists yt_private.account_deletion_jobs(
 );
 revoke all on yt_private.account_deletion_jobs from public, anon, authenticated;
 
--- The target user never changes, and a job row cannot be removed while it still justifies refusing writes.
+-- The target user never changes, and a job row is never removed by this draft: the row is what refuses the user's writes,
+-- and no time limit or operator mark proves that an upload which passed its check earlier cannot still complete.
+-- Releasing the refusal needs a separately reviewed and approved method; until then the row (user id + step results) stays.
 create or replace function yt_private.jobs_guard() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'UPDATE' then
@@ -52,10 +54,7 @@ begin
     new.updated_at := now();
     return new;
   end if;
-  if old.state <> 'AWAITING_ASSURANCE' or old.hold_until is null or old.hold_until > now() then
-    raise exception 'account deletion job: cannot remove a job before its hold has passed';
-  end if;
-  return old;
+  raise exception 'account deletion job: rows cannot be removed (no proven release condition)';
 end
 $$;
 drop trigger if exists jobs_guard on yt_private.account_deletion_jobs;
@@ -111,7 +110,8 @@ begin
          last_error = coalesce(p_note ->> 'error', case when p_to in ('NEEDS_RETRY','NEEDS_OPERATOR') then last_error end),
          log = log || jsonb_build_array(coalesce(p_note, '{}'::jsonb) || jsonb_build_object('at', now(), 'to', p_to)),
          auth_deleted_at = case when p_auth_deleted then now() else auth_deleted_at end,
-         -- Hold at least until every access token issued up to the Auth deletion has expired, plus 5 minutes for clock skew.
+         -- Earliest time worth reviewing the job (all access tokens issued up to the Auth deletion have expired, plus 5 minutes).
+         -- Informational only: it does not release the refusal and does not allow removing the job.
          hold_until = case when p_auth_deleted then now() + make_interval(secs => token_ttl_seconds + 300) else hold_until end,
          lease_owner = case when p_to in ('AWAITING_ASSURANCE','NEEDS_RETRY','NEEDS_OPERATOR') then null else lease_owner end,
          lease_expires_at = case when p_to in ('AWAITING_ASSURANCE','NEEDS_RETRY','NEEDS_OPERATOR') then null else lease_expires_at end

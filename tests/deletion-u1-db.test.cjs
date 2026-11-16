@@ -137,8 +137,12 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused);
     assert.equal((await as('service',`select public.yt_deletion_claim('${job}','w3',120) c`)).rows[0].c,null,'no claims after the final state');
   });
-  await t.test('the job cannot be removed before its hold passes, and its user id cannot be changed',async()=>{
-    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/before its hold has passed/);
+  await t.test('the job (and so the refusal) cannot be removed, even after its review time has passed; its user id cannot be changed',async()=>{
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/cannot be removed/);
+    // Even when the informational review time is long past and the state is AWAITING_ASSURANCE, time alone releases nothing.
+    await su(`update yt_private.account_deletion_jobs set hold_until=now()-interval '30 days', auth_deleted_at=now()-interval '31 days' where id='${job}'`);
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/cannot be removed/);
+    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused');
     await assert.rejects(()=>su(`update yt_private.account_deletion_jobs set user_id='${B}' where id='${job}'`),/immutable/);
   });
   await t.test('applying the draft twice changes nothing',async()=>{
@@ -147,8 +151,8 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     assert.deepEqual((await su(`select tablename,policyname from pg_policies where policyname like 'yt deletion:%' order by 1,2`)).rows,before);
     assert.equal(before.length,15);
   });
-  await t.test('rollback refuses while a job is held, unless acknowledged; it removes only the guards and keeps the records',async()=>{
-    await assert.rejects(()=>suExec(ROLLBACK),/unfinished or held deletion jobs exist/);
+  await t.test('rollback refuses while any job exists, unless acknowledged; it removes only the guards and keeps the records',async()=>{
+    await assert.rejects(()=>suExec(ROLLBACK),/deletion jobs exist/);
     await db.exec('rollback');   // the failed file left its transaction open
     assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt deletion:%'`)).rows[0].n,15,'refused rollback changed nothing');
     await su(`select set_config('yt.rollback_reopens_pending_users','acknowledged',false)`);

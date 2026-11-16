@@ -5387,15 +5387,16 @@ function snsAutoPostBody(act){
 }
 
 
+/* delete-account の受付済みの応答（契約 yt-deletion-v1）。合わない・通信失敗なら端末のデータを消さない */
+function ytDelAccepted(d){return !!d&&d.accepted===true&&d.contract==='yt-deletion-v1'&&/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(d.job))&&['in_progress','awaiting_assurance','needs_retry','needs_operator'].includes(d.status);}
 async function ytDeleteAccount(uid){
   if(!supabaseClient)return {data:null,error:t('legal.delFail')};
   if(!uid||uid==='guest')return {data:null,error:t('legal.delNeedLogin')};
   try{
     const {data,error}=await supabaseClient.functions.invoke('delete-account',{body:{}});
     if(error)throw error;
-    if(data&&data.status&&data.status!=='needs_retry')return {data,pending:true};
-    if(!data||data.ok!==true)throw new Error((data&&data.error)||'delete failed');
-    return snsOk(data);
+    if(ytDelAccepted(data))return {data,pending:true};
+    throw new Error((data&&data.error)||'delete not accepted');
   }catch(e){
     try{ console.error('[delete-account]',e); }catch(_){}
     return {data:null,error:t('legal.delFail')};
@@ -5906,14 +5907,7 @@ function AppLogic({devId}){
     setShowWelcomeGate(true);
   };
 
-  /* ═══════════════ 【v50新規追加】アカウント削除 ═══════════════
-     処理の順番:
-       ① Edge Function(delete-account) を呼ぶ … サーバー側で完全削除
-          （service_role key はここには無い。JWTで本人だけを削除する）
-       ② 失敗したら、成功したふりをせずエラーを返す（呼び出し元が文言を出す）
-       ③ 成功したら signOut → そのユーザーに属する端末保存キーだけ削除
-          → 画面状態を初期化 → ウェルカム画面へ戻す
-     ※ localStorage.clear() は使わない。言語設定(yurutore_language)は残す。 */
+  /* アカウント削除: 受付済み（ytDelAccepted）なら signOut→本人の端末キーだけ削除→ウェルカムへ。それ以外は端末を変えずにエラー */
   const handleDeleteAccount=async()=>{
     const uid=(session&&session.user&&session.user.id)||null;
     if(!uid)return {ok:false,error:t('legal.delNeedLogin')};

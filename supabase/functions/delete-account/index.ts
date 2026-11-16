@@ -24,6 +24,13 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+// Response contract after a request is accepted (a job exists): HTTP 200 with
+//   { ok: false, accepted: true, contract: 'yt-deletion-v1', job: <uuid>, status: one of ACCEPTED_STATUSES, step? }
+// The app treats a reply as "accepted" only when all of these match. Every failure after acceptance is still such a reply:
+// the job keeps refusing writes and the operator entry continues it; the user does not need to sign in again.
+// Failures before acceptance (config, authentication, accept) carry no `accepted` field.
+const CONTRACT = 'yt-deletion-v1';
+const ACCEPTED_STATUSES = ['in_progress', 'awaiting_assurance', 'needs_retry', 'needs_operator'];
 const BUCKETS = ['avatars', 'post-images'];
 const ALL_STATES = ['WRITES_BLOCKED', 'STORAGE_DELETING', 'STORAGE_VERIFIED', 'DB_DELETING', 'AUTH_DELETING', 'NEEDS_RETRY', 'NEEDS_OPERATOR'];
 // Lease left that a step must still have before it starts an outside action (Storage removal, Auth deletion).
@@ -86,11 +93,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     catch (_) { sessions = 'failed'; }
   }
 
+  const accepted = (status: string, extra: Record<string, unknown> = {}) => {
+    if (!ACCEPTED_STATUSES.includes(status)) status = 'needs_operator';
+    return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status, ...extra });
+  };
+
   // ── 排他を取る（取れなければ別の処理が進めている） ──
   const owner = crypto.randomUUID();
   const { data: claim, error: claimErr } = await admin.rpc('yt_deletion_claim', { p_job: jobId, p_owner: owner, p_lease_seconds: LEASE });
-  if (claimErr) return json({ ok: false, step: 'claim', error: 'Could not continue the request', job: jobId }, 500);
-  if (!claim) return json({ ok: false, status: 'in_progress', job: jobId });
+  if (claimErr) return accepted('needs_retry', { step: 'claim' });   // accepted: the job refuses writes; the operator continues
+  if (!claim) return accepted('in_progress');
   const uid: string = claim.user_id;
   const gen: number = claim.generation;
   let state: string = claim.state;
@@ -105,12 +117,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     state = to;
     return true;
   };
-  const stopped = () => json({ ok: false, status: 'in_progress', job: jobId });
+  const stopped = () => accepted('in_progress');
   const failed = async (step: string, e: unknown, authDeleted = false) => {
     console.error('[delete-account] 失敗', step, e);
     const to = authDeleted ? 'NEEDS_OPERATOR' : 'NEEDS_RETRY';
     if (!(await advance([state], to, { step, error: String((e as Err)?.message ?? e) }, authDeleted))) return stopped();
-    return json({ ok: false, status: to === 'NEEDS_OPERATOR' ? 'needs_operator' : 'needs_retry', step, job: jobId });
+    return accepted(to === 'NEEDS_OPERATOR' ? 'needs_operator' : 'needs_retry', { step });
   };
   // Lists every object under {uid}/ in a bucket, following pages to the end.
   const listAll = async (bucket: string): Promise<{ names: string[]; missing: boolean }> => {
@@ -174,8 +186,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try { left = await remaining(); } catch (e) { return await failed('storage_after_auth', e, true); }
     if (left !== 0) return await failed('storage_after_auth', `objects after auth deletion: ${left}`, true);
     if (!(await advance(['AUTH_DELETING'], 'AWAITING_ASSURANCE', { remaining_after_auth: 0 }, true))) return stopped();
-    return json({ ok: false, status: 'awaiting_assurance', job: jobId });
+    return accepted('awaiting_assurance');
   } catch (e) {
-    return await failed('unexpected', e);
+    try { return await failed('unexpected', e); } catch (_) { return accepted('needs_operator', { step: 'unexpected' }); }
   }
 });

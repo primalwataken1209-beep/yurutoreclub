@@ -28,6 +28,7 @@ function setup(opts={}){
       return {data:j.id,error:null};}
     const j=jobs.get(a.p_job);
     if(name==='yt_deletion_claim'){
+      if(fail.claim)return {data:null,error:{message:'claim failed'}};
       if(!j||j.state==='AWAITING_ASSURANCE'||(j.lease_owner&&j.lease_expires_at>now()&&j.lease_owner!==a.p_owner))return {data:null,error:null};
       j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
       return {data:{generation:j.generation,state:j.state,user_id:j.user_id},error:null};}
@@ -176,6 +177,28 @@ test('missing token-lifetime or lease settings: refused before anything happens'
 test('missing/invalid authentication never creates a job or deletes data',async()=>{
   const a=setup();assert.equal((await a.run({auth:null})).status,401);assert.equal(a.calls.length,0);
   const b=setup({fail:{getUser:true}});assert.equal((await b.run()).status,401);assert.equal(b.jobs.size,0);assert.equal(kinds(b).length,0);
+});
+const UUID=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const isAcceptedReply=b=>b.ok===false&&b.accepted===true&&b.contract==='yt-deletion-v1'&&UUID.test(b.job)&&['in_progress','awaiting_assurance','needs_retry','needs_operator'].includes(b.status);
+test('contract: every reply after acceptance is HTTP 200 with accepted/contract/job/known status; replies before acceptance are not',async()=>{
+  const cases=[
+    setup({objects:{avatars:[`${uid}/a.jpg`]}}),                                       // full run
+    setup({fail:{list:{avatars:{message:'Network error'}}}}),                            // needs_retry
+    setup({fail:{deleteUser:{message:'x'}}}),                                           // needs_retry at Auth
+    setup({hooks:{afterDeleteUser:s=>s.avatars.add(`${uid}/late.jpg`)}}),               // needs_operator
+    setup({fail:{claim:true}}),                                                         // claim failed after acceptance
+  ];
+  for(const s of cases){const r=await s.run();assert.equal(r.status,200);assert.ok(isAcceptedReply(r.body),JSON.stringify(r.body));}
+  const blocked=setup();blocked.jobs.set('11111111-1111-1111-1111-111111111111',{id:'11111111-1111-1111-1111-111111111111',user_id:uid,state:'STORAGE_DELETING',generation:1,lease_owner:'other',lease_expires_at:Date.now()+60000,ttl:3600,log:[],hold_until:null});
+  assert.ok(isAcceptedReply((await blocked.run()).body),'another worker: accepted, in progress');
+  for(const [s,opt] of [[setup({fail:{getUser:true}}),{}],[setup({env:{YT_ACCESS_TOKEN_TTL_SECONDS:''}}),{}],[setup(),{auth:null}]]){
+    const r=await s.run(opt);assert.notEqual(r.status,200);assert.equal(r.body.accepted,undefined,'no accepted flag before acceptance');
+  }
+});
+test('a failure to take the lease right after acceptance is still "accepted" (the operator continues; no new sign-in needed)',async()=>{
+  const s=setup({fail:{claim:true}});const r=await s.run();
+  assert.deepEqual([r.body.status,r.body.step],['needs_retry','claim']);assert.equal(s.jobs.size,1);
+  assert.deepEqual(s.calls.find(c=>c[0]==='signOut'),['signOut','global']);
 });
 test('a failed session sign-out is recorded but does not stop the deletion (the job refuses writes either way)',async()=>{
   const s=setup({fail:{signOut:true}});

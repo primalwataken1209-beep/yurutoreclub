@@ -20,11 +20,12 @@ async function setup(t,{lang='ja',answer}){
   const q=v=>{const p=new Proxy({},{get:(_,k)=>k==='then'?(ok,ng)=>Promise.resolve(v).then(ok,ng):()=>p});return p;};
   let session={user:{id:ME,email:'synthetic@example.invalid',user_metadata:{}}};
   const row={nickname:'ゆるパンダ',avatar_url:null,is_public:true};
+  let invokeImpl=async()=>answer;
   const profiles={upsert:()=>Promise.resolve({data:null,error:null}),
     select:()=>({eq:()=>({maybeSingle:()=>Promise.resolve({data:row,error:null})})})};
   w.supabase={createClient:()=>({from:tb=>tb==='profiles'?profiles:q({data:[],error:null,count:0}),
     storage:{from:()=>({download:async()=>({data:null,error:{message:'none'}})})},rpc:()=>q({data:null,error:null}),
-    functions:{invoke:async(name)=>{calls.push(['invoke',name]);return answer;}},
+    functions:{invoke:async(name)=>{calls.push(['invoke',name]);return invokeImpl(name);}},
     auth:{getSession:async()=>({data:{session}}),getUser:async()=>({data:{user:session&&session.user}}),
       onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}}),signOut:async()=>{calls.push(['signOut']);session=null;return {error:null};}}})};
   for(const [pkg,file] of [['react','react.production.min.js'],['react-dom','react-dom.production.min.js']])w.eval(fs.readFileSync(path.join(path.dirname(require.resolve(pkg+'/package.json')),'umd',file),'utf8'));
@@ -35,31 +36,57 @@ async function setup(t,{lang='ja',answer}){
   const L=lang==='ja'?{prof:'プロフ',del:'アカウントを削除',go:'削除へ進む',confirm:'削除する'}:{prof:'Profile',del:'Delete account',go:'Continue to delete',confirm:'Delete account'};
   const runDeletion=async()=>{await click(L.prof,400);await click(L.del);await click(L.go);
     const buttons=[...doc.querySelectorAll('button')].filter(b=>b.textContent.trim()===L.confirm);assert.ok(buttons.length>=1);buttons.at(-1).click();await settle(500);};
-  return {w,doc,calls,errors,runDeletion,text:()=>doc.getElementById('root').textContent};
+  return {w,doc,calls,errors,runDeletion,setInvoke:fn=>{invokeImpl=fn;},text:()=>doc.getElementById('root').textContent};
 }
 const PENDING={ja:'退会の手続きを受け付けました。削除の確認には少し時間がかかります。',en:'We have received your deletion request. Confirming the deletion takes a little time.'};
 const FAIL={ja:'アカウントを削除できませんでした',en:"We couldn't delete your account"};
 
-for(const status of ['awaiting_assurance','in_progress','needs_operator'])for(const lang of ['ja','en']){
-  test(`${lang}: "${status}" is shown as accepted (signed out, local data cleared), not as failure`,async t=>{
-    const s=await setup(t,{lang,answer:{data:{ok:false,status,job:'j'},error:null}});
+const JOB='0f3c2b1a-1234-4abc-8def-0123456789ab';
+const reply=(status,extra={})=>({data:{ok:false,accepted:true,contract:'yt-deletion-v1',job:JOB,status,...extra},error:null});
+const deviceLeft=s=>{let n=0;for(let i=0;i<s.w.localStorage.length;i++)if(s.w.localStorage.key(i).endsWith('-'+ME))n++;return n;};
+// needs_retry after acceptance is accepted too: the job already refuses writes and the operator continues it.
+for(const status of ['awaiting_assurance','in_progress','needs_operator','needs_retry'])for(const lang of ['ja','en']){
+  test(`${lang}: accepted reply "${status}" → signed out, local data cleared, pending notice, no failure text`,async t=>{
+    const s=await setup(t,{lang,answer:reply(status,status==='needs_retry'?{step:'claim'}:{})});
     await s.runDeletion();
     assert.deepEqual(s.calls.map(c=>c[0]),['invoke','signOut']);
     assert.ok(s.text().includes(PENDING[lang]),'pending notice on the welcome screen');
     assert.equal(s.text().includes(FAIL[lang]),false);
-    let left=0;for(let i=0;i<s.w.localStorage.length;i++)if(s.w.localStorage.key(i).endsWith('-'+ME))left++;
-    assert.equal(left,0,'this user\'s device data cleared');
+    assert.equal(deviceLeft(s),0,'this user\'s device data cleared');
     assert.deepEqual(s.errors,[]);
   });
 }
-test('needs_retry: shown as failure, still signed in, can retry',async t=>{
-  const s=await setup(t,{answer:{data:{ok:false,status:'needs_retry',step:'storage_list:avatars'},error:null}});
+// Anything that does not match the accepted contract exactly: failure shown, still signed in, device data kept.
+const notAccepted={
+  'unknown status':reply('completed'),
+  'status missing':reply(undefined),
+  'contract missing':{data:{ok:false,accepted:true,job:JOB,status:'in_progress'},error:null},
+  'other contract':reply('in_progress',{contract:'yt-deletion-v2'}),
+  'accepted missing':{data:{ok:false,contract:'yt-deletion-v1',job:JOB,status:'in_progress'},error:null},
+  'job not a uuid':reply('in_progress',{job:'j'}),
+  'job missing':reply('in_progress',{job:undefined}),
+  'old-style reply (status only)':{data:{ok:false,status:'awaiting_assurance',job:'j'},error:null},
+  // ok:true no longer means anything on its own: only the accepted contract is trusted (Work found the old fallback, 2026-11-16).
+  'ok:true with unexpected status':{data:{ok:true,status:'unexpected'},error:null},
+  'ok:true with accepted:false':{data:{ok:true,accepted:false},error:null},
+  'ok:true alone (old server reply)':{data:{ok:true,deleted:['auth.users(hard delete)']},error:null},
+  'ok:true plus a valid-looking contract but unknown status':{data:{ok:true,accepted:true,contract:'yt-deletion-v1',job:JOB,status:'done'},error:null},
+  'function error (401/500)':{data:null,error:{message:'500'}},
+  'empty reply':{data:null,error:null},
+};
+for(const [name,answer] of Object.entries(notAccepted)){
+  test(`not accepted (${name}) → failure, still signed in, device data kept`,async t=>{
+    const s=await setup(t,{answer});
+    const before=deviceLeft(s);assert.ok(before>0);
+    await s.runDeletion();
+    assert.ok(s.text().includes(FAIL.ja));assert.equal(s.calls.some(c=>c[0]==='signOut'),false);
+    assert.equal(s.text().includes(PENDING.ja),false);assert.equal(deviceLeft(s),before,'device data untouched');
+  });
+}
+test('network failure (invoke throws) → failure, device data kept',async t=>{
+  const s=await setup(t,{answer:null});
+  const before=deviceLeft(s);assert.ok(before>0);
+  s.setInvoke(async()=>{throw new Error('Failed to fetch');});   // as a dropped connection would
   await s.runDeletion();
-  assert.ok(s.text().includes(FAIL.ja));assert.equal(s.calls.some(c=>c[0]==='signOut'),false);
-  assert.equal(s.text().includes(PENDING.ja),false);
-});
-test('an error from the function (e.g. 401/500) is a failure, as before',async t=>{
-  const s=await setup(t,{answer:{data:null,error:{message:'500'}}});
-  await s.runDeletion();
-  assert.ok(s.text().includes(FAIL.ja));assert.equal(s.calls.some(c=>c[0]==='signOut'),false);
+  assert.ok(s.text().includes(FAIL.ja));assert.equal(deviceLeft(s),before);
 });
