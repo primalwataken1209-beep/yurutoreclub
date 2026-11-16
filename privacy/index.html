@@ -48,8 +48,11 @@
     <li>メールアドレス</li>
     <li>メールとパスワードによる認証情報（認証基盤 Supabase Auth が管理します。当方はパスワードそのものを閲覧できません）</li>
     <li>Google アカウントによるログイン（Google OAuth）を利用した場合の、認証結果として提供される情報</li>
-    <li>ログイン時の IP アドレスと、端末・ブラウザの種類（認証基盤 Supabase Auth がログイン状態の管理のために記録します）</li>
+    <li>ログイン時の IP アドレスと、端末・ブラウザの種類、ログイン状態（セッション）の識別子（認証基盤 Supabase Auth がログイン状態の管理のために記録します）</li>
   </ul>
+  <p>
+    オンライン機能の利用時、認証や安全確保、障害調査のため、サービス基盤が通信記録を保存します。記録には IP アドレスなどの通信情報と、IP アドレスから推定される国・都市などのおおよその地域が含まれる場合があります。端末の GPS 位置情報は取得しません。
+  </p>
 
   <h3>プロフィール情報（すべて任意入力）</h3>
   <ul>
@@ -138,7 +141,10 @@
     運動記録に添付した写真は、現在の実装では利用者の端末内にのみ保存され、運動記録を保存しただけではサーバーへ送信されません。
     ただし、利用者がその写真を含めてSNSへ投稿することを選択した場合、またはSNSの投稿に写真を添付した場合、その写真はSNS機能を提供するためにサーバー（Supabase Storage）へ送信・保存され、投稿と同じ範囲の他の利用者に表示されます。
     送信される写真は、アプリ内で縮小・再変換されたものです。投稿を削除した場合やアカウントを削除した場合、その投稿に添付した写真も削除されます。
-    端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合（以前のバージョンで初期値として設定されたものなど）、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。他の利用者の画面では、外部の URL の画像は読み込まれず、既定のアイコンが表示されます。
+    以前のバージョンで初期値として設定されたものなど、端末内またはサーバー上のご自身のプロフィールに Google のプロフィール画像の URL が残っている場合があります。
+    Android アプリのバージョン 1.0.7 以降は、この URL の画像を読み込まず、既定のアイコンを表示します（URL の値は削除しません。新しい写真を選ぶと置き換わります）。
+    Android アプリのバージョン 1.0.6 以前と Web 版では、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。
+    他の利用者の画面では、どのバージョンでも外部の URL の画像は読み込まれず、既定のアイコンが表示されます。
   </p>
 
   <h2>9. 端末内に保存される情報</h2>
@@ -250,7 +256,7 @@
 
   <h2>20. 制定日・改定日</h2>
   <p>制定日：2026年9月8日</p>
-  <p>最終改定日：2026年11月5日</p>
+  <p>最終改定日：2026年11月16日</p>
 </section>
 
 <!-- ═══════════════════ English ═══════════════════ -->
@@ -278,8 +284,11 @@
     <li>Email address</li>
     <li>Email and password credentials (managed by Supabase Auth; we cannot see your password itself)</li>
     <li>Information returned to us when you choose to sign in with Google (Google OAuth)</li>
-    <li>The IP address and device or browser type used when you sign in (recorded by Supabase Auth to manage your signed-in sessions)</li>
+    <li>The IP address, device or browser type and sign-in session identifier used when you sign in (recorded by Supabase Auth to manage your signed-in sessions)</li>
   </ul>
+  <p>
+    When you use online features, our service infrastructure keeps connection records for authentication, security and troubleshooting. These records may include connection information such as an IP address and an approximate country or city inferred from it. We do not access your device's GPS location.
+  </p>
 
   <h3>Profile information (all optional)</h3>
   <ul>
@@ -367,7 +376,10 @@
     Photos attached to activity logs stay on your own device in the current implementation and are not uploaded to our servers just because you save a log.
     However, if you choose to share a log together with its photo in the community, or attach a photo to a community post, that photo is sent to and stored on our servers (Supabase Storage) so the community feature can work, and it is shown to the same members who can see the post.
     Photos are resized and re-encoded in the app before they are sent. If you delete the post or your account, the photo attached to that post is deleted as well.
-    If the copy of your own profile on a device holds the URL of your Google profile picture (for example, one an earlier version set as the default), that device loads the image from Google's servers when it shows your own posts or your own community profile screen (sending your IP address and other information needed for the connection to Google). Other members' screens do not load images from outside URLs and show the default icon instead.
+    Your own profile, on your device or on our servers, may still hold the URL of your Google profile picture (for example, one an earlier version set as the default).
+    Android app version 1.0.7 and later does not load an image from that URL and shows the default icon instead (the URL value is not deleted; choosing a new photo replaces it).
+    In Android app version 1.0.6 and earlier and in the web version, the device loads that image from Google's servers when it shows your own posts or your own community profile screen (sending your IP address and other information needed for the connection to Google).
+    In every version, other members' screens do not load images from outside URLs and show the default icon instead.
   </p>
 
   <h2>9. Information stored on your device</h2>
@@ -471,7 +483,7 @@
 
   <h2>20. Dates</h2>
   <p>Effective date: September 8, 2026</p>
-  <p>Last updated: November 5, 2026</p>
+  <p>Last updated: November 16, 2026</p>
 </section>
 
 <footer class="lg-footer">
