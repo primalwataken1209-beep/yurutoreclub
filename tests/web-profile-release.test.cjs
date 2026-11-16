@@ -21,7 +21,7 @@ test('the profile protection is present and the email is never turned into a nam
 });
 test('privacy: Japanese and English carry the same revision date, describe the Android app only, and match the profile behaviour',()=>{
   const ja=block(privacy,'ja'),en=block(privacy,'en');
-  assert.match(ja,/最終改定日：2026年11月5日/);assert.match(en,/Last updated: November 5, 2026/);
+  assert.match(ja,/最終改定日：2026年11月16日/);assert.match(en,/Last updated: November 16, 2026/);
   assert.match(ja,/制定日：2026年9月8日/);assert.match(en,/Effective date: September 8, 2026/);
   assert.match(ja,/Android アプリ版では/);assert.match(en,/In the Android app/);
   assert.equal(/iOS|キーチェーン|Keychain/.test(privacy),false);
@@ -55,7 +55,6 @@ test('the code matches: mood, chats and time capsules are part of the synced sta
   assert.match(app,/function pandaChatReply\(text,type\)\{\n  const cat=pandaChatCategory\(text,type\);\n  return pickPandaChatReply\(cat\);/);
 });
 // External (Google) images: no screen loads them any more (other members never did; the owner's own screens now show the default icon).
-// The privacy text below still describes the earlier owner-only load; it is unchanged here and needs its own approved update.
 test('the code matches: an external Google image is not loaded for anyone, including its owner',()=>{
   const {functions}=require('./helpers.cjs');
   const c=functions(['avatarRefFromValue','ytSafeLocalImg','selfAvatarLocal'],{SUPABASE_URL:'https://eszheiabjwehcbrteqza.supabase.co',
@@ -69,11 +68,21 @@ test('the code matches: an external Google image is not loaded for anyone, inclu
   assert.equal((app.match(/selfAvatarLocal\(state\.user\)/g)||[]).length,2);
   assert.match(app,/isMine\?selfAvatarLocal\(state\.user\):null/);assert.match(app,/isMe\?selfAvatarLocal\(state\.user\):null/);
   assert.match(app,/<SnsAvatar value=\{p&&p\.avatar_url\} className="avatar"/,'lists pass no local image');
+  // The privacy text separates Android 1.0.7+ (no load) from Android 1.0.6 and earlier and the web version (owner's own screens load it).
   const ja=block(privacy,'ja'),en=block(privacy,'en');
-  assert.match(ja,/端末内のご自身のプロフィールに Google のプロフィール画像の URL が設定されている場合/);
-  assert.match(ja,/ご自身の投稿やご自身の SNS プロフィール画面を表示するときに/);assert.match(ja,/他の利用者の画面では、外部の URL の画像は読み込まれず/);
-  assert.match(en,/when it shows your own posts or your own community profile screen/);assert.match(en,/Other members' screens do not load images from outside URLs/);
+  assert.match(ja,/Android アプリのバージョン 1\.0\.7 以降は、この URL の画像を読み込まず、既定のアイコンを表示します（URL の値は削除しません。新しい写真を選ぶと置き換わります）/);
+  assert.match(ja,/Android アプリのバージョン 1\.0\.6 以前と Web 版では、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます/);
+  assert.match(ja,/他の利用者の画面では、どのバージョンでも外部の URL の画像は読み込まれず/);
+  assert.match(en,/Android app version 1\.0\.7 and later does not load an image from that URL and shows the default icon instead/);
+  assert.match(en,/In Android app version 1\.0\.6 and earlier and in the web version, the device loads that image from Google's servers when it shows your own posts or your own community profile screen/);
+  assert.match(en,/In every version, other members' screens do not load images from outside URLs/);
   assert.equal(/ご自身の画面でだけ表示され|shown only on your own screen/.test(privacy),false);
+});
+test('privacy: session identifier and infrastructure connection records (approximate area from IP, no GPS) in both languages',()=>{
+  const ja=block(privacy,'ja'),en=block(privacy,'en');
+  assert.match(ja,/ログイン状態（セッション）の識別子/);assert.match(en,/sign-in session identifier/);
+  assert.match(ja,/IP アドレスから推定される国・都市などのおおよその地域が含まれる場合があります。端末の GPS 位置情報は取得しません。/);
+  assert.match(en,/an approximate country or city inferred from it\. We do not access your device's GPS location\./);
 });
 test('account deletion: post photos are listed and the revision date is shown in both languages',()=>{
   const ja=block(deletion,'ja'),en=block(deletion,'en');
