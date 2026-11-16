@@ -54,14 +54,16 @@ test('the code matches: mood, chats and time capsules are part of the synced sta
   assert.match(app,/if\(!userId\|\|userId==='guest'\)return; \/\/ 体験版（未ログイン）は同期しない/);
   assert.match(app,/function pandaChatReply\(text,type\)\{\n  const cat=pandaChatCategory\(text,type\);\n  return pickPandaChatReply\(cat\);/);
 });
-// External (Google) images: other members' screens never load them; only the owner's own screen does.
-test('the code matches: an external Google image is shown only to its owner, never loaded for other members',()=>{
+// External (Google) images: no screen loads them any more (other members never did; the owner's own screens now show the default icon).
+// The privacy text below still describes the earlier owner-only load; it is unchanged here and needs its own approved update.
+test('the code matches: an external Google image is not loaded for anyone, including its owner',()=>{
   const {functions}=require('./helpers.cjs');
-  const c=functions(['avatarRefFromValue','selfAvatarLocal'],{SUPABASE_URL:'https://eszheiabjwehcbrteqza.supabase.co',
+  const c=functions(['avatarRefFromValue','ytSafeLocalImg','selfAvatarLocal'],{SUPABASE_URL:'https://eszheiabjwehcbrteqza.supabase.co',
     AVATAR_REF_RE:/^avatars\/([0-9a-f-]{36})\/avatar\.jpg(?:\?v=([0-9]{1,16}))?$/});
   const g='https://lh3.googleusercontent.com/a/example';
   assert.equal(c.avatarRefFromValue(g),null,'not a Storage avatar, so other members get the default icon');
-  assert.equal(c.selfAvatarLocal({avatarUrl:g}),g,'the owner sees it, from the device copy of their own profile');
+  assert.equal(c.selfAvatarLocal({avatarUrl:g}),null,'the owner gets the default icon too');
+  assert.equal(c.selfAvatarLocal({avatar:g}),null,'even when an old device copy holds the URL');
   assert.equal(c.selfAvatarLocal({avatarUrl:'http://lh3.googleusercontent.com/a/example'}),null,'only https');
   // Only two places pass the owner's own image: their own posts (isMine) and their own profile screen (isMe).
   assert.equal((app.match(/selfAvatarLocal\(state\.user\)/g)||[]).length,2);

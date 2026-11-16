@@ -4627,18 +4627,15 @@ async function loadAvatarEntry(value){
   return job;
 }
 async function loadAvatarSrc(value){ return (await loadAvatarEntry(value)).url; }
-/* 本人の画面でだけ使う画像（端末内の dataURL、または本人の外部URL）。他人の表示には渡さない。 */
-function selfAvatarLocal(user){
-  if(!user)return null;
-  if(user.avatar)return user.avatar;
-  const u=user.avatarUrl;
-  return (typeof u==='string'&&/^https:\/\//.test(u)&&!avatarRefFromValue(u))?u:null;
-}
+/* 端末の画像として出すのは端末内の data:image / blob: だけ。外部URL（旧版のGoogle画像など）は読み込まず既定アイコン。値は消さない */
+function ytSafeLocalImg(v){return (typeof v==='string'&&/^(data:image\/|blob:)/.test(v))?v:null;}
+function selfAvatarLocal(user){return user?ytSafeLocalImg(user.avatar):null;}
 /* 表示用フック。local（本人の端末画像）があればそれを優先し、通信しない。
    【v51.4.7追加修正】表示中も、結果の期限（成功＝キャッシュ期限／失敗＝再試行時刻）が来たら取り直す。
    非公開に切り替わっていれば、その時点で画像を外して既定アイコンにする。
    初回表示でキャッシュを同期的に読まない（閲覧者の確認前に別の人のキャッシュを出さないため）。 */
 function useAvatarSrc(value,local){
+  local=ytSafeLocalImg(local);
   const ref=local?null:avatarRefFromValue(value);
   const [src,setSrc]=useState(null);
   const [tick,setTick]=useState(0);

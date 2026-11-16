@@ -120,7 +120,7 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   const bundle=compile(source);
 
   const csp=["default-src 'self'","script-src 'self'","style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: "+supabaseUrl+' https://*.googleusercontent.com',"connect-src "+supabaseUrl,
+    "img-src 'self' data: blob: "+supabaseUrl,"connect-src "+supabaseUrl,
     "font-src 'self'","object-src 'none'","base-uri 'self'","frame-src 'none'","form-action 'none'"].join('; ');
   const native=['vendor/capacitor.js','vendor/capacitor-app.js','vendor/capacitor-browser.js','vendor/capacitor-secure-storage.js',
     'native-config.js','native-bridge.js','native-storage.js'];
