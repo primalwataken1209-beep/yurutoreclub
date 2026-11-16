@@ -1,38 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// ゆるトレ倶楽部 v50 — アカウント削除 Edge Function
+// ゆるトレ倶楽部 — アカウント削除 Edge Function（U1 案・未適用・未配置）
 //   supabase/functions/delete-account/index.ts
 //
-// 【なぜ Edge Function なのか】
-//   Auth ユーザーの完全削除（hard delete）には service_role key が必要です。
-//   service_role key をブラウザの JavaScript に置くと、
-//   誰でも全ユーザーのデータを操作できてしまいます。
-//   そのため削除処理はサーバー側（この Edge Function）でのみ行い、
-//   フロントには従来どおり Publishable / Anon Key しか置きません。
+// 【U1 の考え方】（claude-handoff/upload-decision-u1-20261116.txt）
+//   受付で本人を JWT から確かめ、非公開の削除ジョブを作る。ジョブがある間、その本人の JWT による作成・変更は
+//   DB/Storage の規則で拒否される（supabase/manual/deletion_u1_prepare.sql）。そのうえで Storage → 関連の行 → Auth の順に消す。
+//   許可の判定の後に完了する送信が残らないことは、公開資料では保証されない。だから最後まで終わっても「完了」とは言わず、
+//   状態は AWAITING_ASSURANCE（確認待ち）にする。応答の ok は常に false（旧アプリに「削除しました」と伝えないため）。
 //
-// 【deploy 手順】
-//   supabase functions deploy delete-account
-//   supabase secrets set SERVICE_ROLE_KEY=xxxxxxxx   ← Dashboard から取得
-//   （SUPABASE_URL は Supabase が自動で渡します）
+// 【入口】
+//   ・利用者: Authorization に本人のアクセストークン。受付と、Auth を消す前の続き。クライアントの user_id は使わない
+//   ・運営の後処理: Authorization に service role key、本文 {job_id}。対象はジョブに保存された UID だけ（UID は受け取らない）
 //
-// 【呼び出し方（アプリ側）】
-//   supabaseClient.functions.invoke('delete-account')
-//   → Authorization ヘッダの JWT から「本人」を特定します。
-//     クライアントから user_id を受け取ることは絶対にしません。
-//
-// 【v51.2 追記】
-//   SNS投稿写真（Storage: post-images/{userId}/）も削除対象に追加（STEP 2b）。
-//   それ以外の処理・CORS設定・認証の流れは v50 から変更していません。
-//
-// 【v51.4.6 追記（Codexレビュー P1 対応）】
-//   Storage の list エラーは「バケットが存在しない」場合だけスキップし、
-//   それ以外（通信・権限・サーバーエラー）は退会を失敗として返す（写真を残したまま完了にしない）。
-//
-// 【安全設計】
-//   ・認証済みユーザーのみ実行可能
-//   ・削除対象は必ず JWT から取り出した本人（他人は指定できない）
-//   ・途中でエラーが起きたら、成功したふりをせず失敗として返す
-//   ・存在しないテーブル（user_progress など）は「無い」として安全にスキップする
-//     が、本当に削除に失敗した場合は成功にしない
+// 【必須の設定】 SUPABASE_URL、SERVICE_ROLE_KEY（または SUPABASE_SERVICE_ROLE_KEY）、
+//   YT_ACCESS_TOKEN_TTL_SECONDS（プロジェクトのアクセストークンの有効期間。推測の既定値は持たない）、
+//   YT_DELETION_LEASE_SECONDS（1つの呼び出しが同時に1つだけ進むための排他の長さ。60以上）
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.118.0';
@@ -42,245 +24,158 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+const BUCKETS = ['avatars', 'post-images'];
+const ALL_STATES = ['WRITES_BLOCKED', 'STORAGE_DELETING', 'STORAGE_VERIFIED', 'DB_DELETING', 'AUTH_DELETING', 'NEEDS_RETRY', 'NEEDS_OPERATOR'];
+// Lease left that a step must still have before it starts an outside action (Storage removal, Auth deletion).
+const MIN_LEASE_LEFT_SECONDS = 30;
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-  });
+  return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
 }
-
-/** 【v51.4.6】Storage の list エラーが「バケットが存在しない」ことによるものかを判定する。
- *  これだけはスキップしてよい（移行前の環境）。通信・権限・サーバーエラーなど
- *  それ以外はすべて false（＝退会を失敗として返し、利用者が再試行できるようにする）。 */
-function isMissingBucket(error: { message?: string; error?: string; statusCode?: string | number } | null): boolean {
-  if (!error) return false;
-  const msg = String(error.message || '');
-  const err = String(error.error || '');
-  return /bucket not found/i.test(msg) || /bucket not found/i.test(err);
+type Err = { message?: string; error?: string; code?: string; statusCode?: string | number } | null;
+function isMissingBucket(e: Err): boolean {
+  return !!e && (/bucket not found/i.test(String(e.message || '')) || /bucket not found/i.test(String(e.error || '')));
 }
-
-/** テーブルが存在しない／権限が無い等の「無いから消せない」系エラーかを判定する。
- *  これらは削除失敗ではなく「消すものが無い」として扱ってよい。 */
-function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  const code = String(error.code || '');
-  const msg = String(error.message || '');
-  return (
-    code === '42P01' ||                                  // undefined_table
-    code === 'PGRST205' ||                               // PostgREST: table not found
-    /relation .* does not exist/i.test(msg) ||
-    /Could not find the table/i.test(msg) ||
-    /schema cache/i.test(msg)
-  );
+function isMissingRelation(e: Err): boolean {
+  if (!e) return false;
+  const code = String(e.code || ''), msg = String(e.message || '');
+  return code === '42P01' || code === 'PGRST205' || /relation .* does not exist/i.test(msg) || /Could not find the table/i.test(msg) || /schema cache/i.test(msg);
+}
+function isUserNotFound(e: Err): boolean {
+  return !!e && (/user not found/i.test(String(e.message || '')) || String(e.statusCode || '') === '404' || String(e.code || '') === 'user_not_found');
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  // ── CORS プリフライト ──
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: CORS_HEADERS });
-  }
-  if (req.method !== 'POST') {
-    return json({ ok: false, step: 'method', error: 'Method not allowed' }, 405);
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
+  if (req.method !== 'POST') return json({ ok: false, step: 'method', error: 'Method not allowed' }, 405);
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
-  // SERVICE_ROLE_KEY はサーバー側の secret としてのみ扱う。フロントには絶対に出さない。
-  const SERVICE_ROLE_KEY =
-    Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    console.error('[delete-account] 環境変数が設定されていません');
+  const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const TTL = Number(Deno.env.get('YT_ACCESS_TOKEN_TTL_SECONDS') ?? '');
+  const LEASE = Number(Deno.env.get('YT_DELETION_LEASE_SECONDS') ?? '');
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !Number.isInteger(TTL) || TTL <= 0 || !Number.isInteger(LEASE) || LEASE < 60) {
+    console.error('[delete-account] 設定が不足しています');
     return json({ ok: false, step: 'config', error: 'Server is not configured' }, 500);
   }
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ ok: false, step: 'auth', error: 'Missing Authorization header' }, 401);
 
-  // ── STEP 1: JWT から本人の user ID を取得する ───────────────────────────
-  // クライアントが渡した user_id は一切信用しない（他人を削除させないため）。
-  const authHeader = req.headers.get('Authorization') ?? '';
-  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  if (!token) {
-    return json({ ok: false, step: 'auth', error: 'Missing Authorization header' }, 401);
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+
+  // ── 受付（利用者）または後処理（運営）でジョブを決める ──
+  let jobId: string | null = null;
+  let sessions = 'not_requested';
+  if (token === SERVICE_ROLE_KEY) {
+    let body: { job_id?: unknown } = {};
+    try { body = await req.json(); } catch (_) { /* empty */ }
+    if (typeof body.job_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.job_id)) return json({ ok: false, step: 'job', error: 'job_id required' }, 400);
+    jobId = body.job_id;
+  } else {
+    const { data: userData, error: userErr } = await admin.auth.getUser(token);
+    const user = userData?.user ?? null;
+    if (userErr || !user) return json({ ok: false, step: 'auth', error: 'Not authenticated' }, 401);
+    const { data: accepted, error: acceptErr } = await admin.rpc('yt_deletion_accept', { p_user: user.id, p_token_ttl_seconds: TTL });
+    if (acceptErr || !accepted) {
+      console.error('[delete-account] 受付に失敗', acceptErr);
+      return json({ ok: false, step: 'accept', error: 'Could not accept the request' }, 500);
+    }
+    jobId = String(accepted);
+    // Sign out every session of this user: refresh tokens stop working. Access tokens already issued stay valid until they
+    // expire (Supabase docs), so the job's write refusal is what stops them. A failure here is recorded, not fatal.
+    try { const { error } = await admin.auth.admin.signOut(token, 'global'); sessions = error ? 'failed' : 'revoked'; }
+    catch (_) { sessions = 'failed'; }
   }
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  // ── 排他を取る（取れなければ別の処理が進めている） ──
+  const owner = crypto.randomUUID();
+  const { data: claim, error: claimErr } = await admin.rpc('yt_deletion_claim', { p_job: jobId, p_owner: owner, p_lease_seconds: LEASE });
+  if (claimErr) return json({ ok: false, step: 'claim', error: 'Could not continue the request', job: jobId }, 500);
+  if (!claim) return json({ ok: false, status: 'in_progress', job: jobId });
+  const uid: string = claim.user_id;
+  const gen: number = claim.generation;
+  let state: string = claim.state;
 
-  const { data: userData, error: userErr } = await admin.auth.getUser(token);
-  const user = userData?.user ?? null;
-  if (userErr || !user) {
-    console.error('[delete-account] JWTからユーザーを特定できませんでした', userErr);
-    return json({ ok: false, step: 'auth', error: 'Not authenticated' }, 401);
-  }
-
-  const userId = user.id;                 // ← 削除対象は必ずこの人だけ
-  const done: string[] = [];              // 実行できた手順
-  const skipped: string[] = [];           // 対象テーブルが無くスキップした手順
+  // Every state change is a compare-and-set on (generation, owner, from-state) with lease left; losing it stops this call.
+  const advance = async (from: string[], to: string, note: Record<string, unknown>, authDeleted = false): Promise<boolean> => {
+    const { data, error } = await admin.rpc('yt_deletion_advance', {
+      p_job: jobId, p_generation: gen, p_owner: owner, p_from: from, p_to: to, p_note: note,
+      p_min_lease_seconds: MIN_LEASE_LEFT_SECONDS, p_auth_deleted: authDeleted,
+    });
+    if (error || data !== true) return false;
+    state = to;
+    return true;
+  };
+  const stopped = () => json({ ok: false, status: 'in_progress', job: jobId });
+  const failed = async (step: string, e: unknown, authDeleted = false) => {
+    console.error('[delete-account] 失敗', step, e);
+    const to = authDeleted ? 'NEEDS_OPERATOR' : 'NEEDS_RETRY';
+    if (!(await advance([state], to, { step, error: String((e as Err)?.message ?? e) }, authDeleted))) return stopped();
+    return json({ ok: false, status: to === 'NEEDS_OPERATOR' ? 'needs_operator' : 'needs_retry', step, job: jobId });
+  };
+  // Lists every object under {uid}/ in a bucket, following pages to the end.
+  const listAll = async (bucket: string): Promise<{ names: string[]; missing: boolean }> => {
+    const names: string[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const { data, error } = await admin.storage.from(bucket).list(uid, { limit: 100, offset });
+      if (error) { if (isMissingBucket(error)) return { names, missing: true }; throw error; }
+      const page = (data ?? []).filter((f: { id?: string | null }) => f.id !== null).map((f: { name: string }) => `${uid}/${f.name}`);
+      names.push(...page);
+      if ((data ?? []).length < 100) return { names, missing: false };
+    }
+  };
+  const remaining = async (): Promise<number> => {
+    let n = 0;
+    for (const b of BUCKETS) n += (await listAll(b)).names.length;
+    return n;
+  };
 
   try {
-    // ── STEP 2: Storage の avatars/{userId}/ 配下を削除 ────────────────────
-    // 現在は {userId}/avatar.jpg のみだが、将来ファイルが増えても消せるよう
-    // フォルダを list してから、見つかったファイルをまとめて削除する。
-    try {
-      const { data: files, error: listErr } = await admin.storage
-        .from('avatars')
-        .list(userId, { limit: 100 });
-
-      if (listErr) {
-        // 【v51.4.6】スキップするのは「バケットが存在しない」場合だけ。
-        // それ以外のエラーは握り潰さず失敗として返す（写真を残したまま退会完了にしない）。
-        if (!isMissingBucket(listErr)) throw listErr;
-        console.warn('[delete-account] avatars バケットが無いためスキップ', listErr);
-        skipped.push('storage:avatars');
-      } else if (files && files.length > 0) {
-        const paths = files.map((f: { name: string }) => `${userId}/${f.name}`);
-        const { error: rmErr } = await admin.storage.from('avatars').remove(paths);
-        if (rmErr) throw rmErr;
-        done.push(`storage:avatars(${paths.length})`);
-      } else {
-        done.push('storage:avatars(0)');
-      }
-    } catch (e) {
-      console.error('[delete-account] STEP2 storage 失敗', e);
-      return json({ ok: false, step: 'storage', error: String(e) }, 500);
-    }
-
-    // ── STEP 2b【v51.2追加】: Storage の post-images/{userId}/ 配下を削除 ──
-    // SNS投稿の写真。posts 行は profiles 削除の CASCADE で消えるが、
-    // Storage のファイルは連鎖しないため、ここで本人フォルダを明示的に空にする。
-    // 1投稿1枚のため件数が多くなり得るので、100件ずつ繰り返し削除する。
-    try {
-      let removed = 0;
+    // ── Storage（何度実行しても同じ結果。途中で失敗したら、消した件数を記録して NEEDS_RETRY） ──
+    if (!(await advance(ALL_STATES, 'STORAGE_DELETING', { sessions }))) return stopped();
+    const removed: Record<string, number> = {};
+    for (const b of BUCKETS) {
+      removed[b] = 0;
       for (let round = 0; round < 1000; round++) {
-        const { data: files, error: listErr } = await admin.storage
-          .from('post-images')
-          .list(userId, { limit: 100, offset: 0 });
-        if (listErr) {
-          // 【v51.4.6】スキップするのはバケット未作成（v51.2 migration 未適用）の場合だけ。
-          // 通信・権限・サーバーエラー等は失敗として返し、利用者が退会を再試行できるようにする。
-          if (!isMissingBucket(listErr)) throw listErr;
-          console.warn('[delete-account] post-images バケットが無いためスキップ', listErr);
-          skipped.push('storage:post-images');
-          break;
+        let found;
+        try { found = await listAll(b); } catch (e) { return await failed(`storage_list:${b}`, e); }
+        if (found.missing || found.names.length === 0) break;
+        const batch = found.names.slice(0, 100);
+        const { error } = await admin.storage.from(b).remove(batch);
+        if (error) {
+          await advance([state], state, { step: `storage_remove:${b}`, removed: { ...removed } });   // record the partial result
+          return await failed(`storage_remove:${b}`, error);
         }
-        const names = (files ?? [])
-          .filter((f: { name: string; id?: string | null }) => f.id !== null)   // フォルダ行は除く
-          .map((f: { name: string }) => `${userId}/${f.name}`);
-        if (names.length === 0) {
-          done.push(`storage:post-images(${removed})`);
-          break;
-        }
-        const { error: rmErr } = await admin.storage.from('post-images').remove(names);
-        if (rmErr) throw rmErr;
-        removed += names.length;
+        removed[b] += batch.length;
       }
-    } catch (e) {
-      console.error('[delete-account] STEP2b post-images 失敗', e);
-      return json({ ok: false, step: 'storage_post_images', error: String(e) }, 500);
+    }
+    let left: number;
+    try { left = await remaining(); } catch (e) { return await failed('storage_verify', e); }
+    if (left !== 0) return await failed('storage_verify', `objects remain: ${left}`);
+    if (!(await advance(['STORAGE_DELETING'], 'STORAGE_VERIFIED', { removed }))) return stopped();
+
+    // ── 関連の行（profiles 以下は外部キーの連鎖） ──
+    if (!(await advance(['STORAGE_VERIFIED'], 'DB_DELETING', {}))) return stopped();
+    const rows: [string, string][] = [['user_progress', 'user_id'], ['app_events', 'user_id'], ['blocks', 'blocker_id'],
+      ['blocks', 'blocked_id'], ['reports', 'reporter_user_id'], ['profiles', 'id']];
+    for (const [table, col] of rows) {
+      const { error } = await admin.from(table).delete().eq(col, uid);
+      if (error && !isMissingRelation(error)) return await failed(`db:${table}`, error);
     }
 
-    // ── STEP 3: user_progress を削除（存在する環境のみ） ───────────────────
-    {
-      const { error } = await admin.from('user_progress').delete().eq('user_id', userId);
-      if (error) {
-        if (isMissingRelation(error)) {
-          skipped.push('user_progress');
-        } else {
-          console.error('[delete-account] STEP3 user_progress 失敗', error);
-          return json({ ok: false, step: 'user_progress', error: error.message }, 500);
-        }
-      } else {
-        done.push('user_progress');
-      }
-    }
+    // ── Auth（直前に排他を取り直し、Storage が空のことを確かめてから） ──
+    if (!(await advance(['DB_DELETING'], 'AUTH_DELETING', {}))) return stopped();
+    try { left = await remaining(); } catch (e) { return await failed('storage_recheck', e); }
+    if (left !== 0) return await failed('storage_recheck', `objects reappeared: ${left}`);
+    if (!(await advance(['AUTH_DELETING'], 'AUTH_DELETING', { check: 'before_auth_delete' }))) return stopped();
+    const { error: authErr } = await admin.auth.admin.deleteUser(uid);
+    if (authErr && !isUserNotFound(authErr)) return await failed('auth_delete', authErr);   // e.g. still owns objects → retry from Storage
 
-    // ── STEP 4: app_events を削除 ─────────────────────────────────────────
-    // v28 の app_events には auth.users への ON DELETE CASCADE が
-    // 明示されていない環境があるため、Auth 削除より先に本人分を必ず消す。
-    {
-      const { error } = await admin.from('app_events').delete().eq('user_id', userId);
-      if (error) {
-        if (isMissingRelation(error)) {
-          skipped.push('app_events');
-        } else {
-          console.error('[delete-account] STEP4 app_events 失敗', error);
-          return json({ ok: false, step: 'app_events', error: error.message }, 500);
-        }
-      } else {
-        done.push('app_events');
-      }
-    }
-
-    // ── STEP 6（先に実行）: v50 で追加したデータ ───────────────────────────
-    // blocks は profiles を参照しているので profiles 削除で連鎖するが、
-    // 「自分が誰かをブロックした行」と「誰かが自分をブロックした行」の
-    // 両方を確実に消すため、ここで明示的に削除する。
-    {
-      const { error } = await admin.from('blocks').delete().eq('blocker_id', userId);
-      if (error && !isMissingRelation(error)) {
-        console.error('[delete-account] blocks(blocker) 失敗', error);
-        return json({ ok: false, step: 'blocks', error: error.message }, 500);
-      }
-      if (error && isMissingRelation(error)) skipped.push('blocks');
-      else done.push('blocks:blocker');
-    }
-    {
-      const { error } = await admin.from('blocks').delete().eq('blocked_id', userId);
-      if (error && !isMissingRelation(error)) {
-        console.error('[delete-account] blocks(blocked) 失敗', error);
-        return json({ ok: false, step: 'blocks', error: error.message }, 500);
-      }
-      if (!error) done.push('blocks:blocked');
-    }
-    {
-      // 本人が出した通報も削除する（reports は auth.users を CASCADE 参照しているが、
-      // 環境差で外部キーが無い場合にも確実に消えるよう明示的に削除する）
-      const { error } = await admin.from('reports').delete().eq('reporter_user_id', userId);
-      if (error && !isMissingRelation(error)) {
-        console.error('[delete-account] reports 失敗', error);
-        return json({ ok: false, step: 'reports', error: error.message }, 500);
-      }
-      if (error && isMissingRelation(error)) skipped.push('reports');
-      else done.push('reports');
-    }
-
-    // ── STEP 5: profiles を削除 ───────────────────────────────────────────
-    // profiles から posts / comments / post_reactions / follows へ
-    // ON DELETE CASCADE が張られているため、この1回でSNSデータがすべて消える。
-    // （v43 マイグレーションの設計をそのまま活用している）
-    {
-      const { error } = await admin.from('profiles').delete().eq('id', userId);
-      if (error) {
-        if (isMissingRelation(error)) {
-          skipped.push('profiles');
-        } else {
-          console.error('[delete-account] STEP5 profiles 失敗', error);
-          return json({ ok: false, step: 'profiles', error: error.message }, 500);
-        }
-      } else {
-        done.push('profiles(+posts/comments/reactions/follows cascade)');
-      }
-    }
-
-    // ── STEP 7: Auth ユーザーを完全削除（hard delete） ────────────────────
-    // 第2引数 shouldSoftDelete を省略＝false。soft delete では終わらせない。
-    {
-      const { error } = await admin.auth.admin.deleteUser(userId);
-      if (error) {
-        console.error('[delete-account] STEP7 auth 削除失敗', error);
-        return json({ ok: false, step: 'auth_delete', error: error.message }, 500);
-      }
-      done.push('auth.users(hard delete)');
-    }
-
-    // ── STEP 8: 成功レスポンス ────────────────────────────────────────────
-    console.log('[delete-account] 完了', { userId, done, skipped });
-    return json({ ok: true, deleted: done, skipped }, 200);
-
+    // ── Auth の後の確認。0 件でも「完了」ではなく確認待ち ──
+    try { left = await remaining(); } catch (e) { return await failed('storage_after_auth', e, true); }
+    if (left !== 0) return await failed('storage_after_auth', `objects after auth deletion: ${left}`, true);
+    if (!(await advance(['AUTH_DELETING'], 'AWAITING_ASSURANCE', { remaining_after_auth: 0 }, true))) return stopped();
+    return json({ ok: false, status: 'awaiting_assurance', job: jobId });
   } catch (e) {
-    // 想定外の例外。握りつぶさず、必ず失敗として返す。
-    console.error('[delete-account] 想定外のエラー', e);
-    return json({ ok: false, step: 'unexpected', error: String(e) }, 500);
+    return await failed('unexpected', e);
   }
 });
-

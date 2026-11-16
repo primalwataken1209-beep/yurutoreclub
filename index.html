@@ -2168,6 +2168,7 @@ ja:{
     delFail:'アカウントを削除できませんでした。通信環境を確認して、もう一度お試しください。',
     delFailContact:'解決しない場合はお問い合わせください',
     delNeedLogin:'アカウントの削除にはログインが必要だよ🐼',
+    delPending:'退会の手続きを受け付けました。削除の確認には少し時間がかかります。',
     menuAria:'この投稿のメニュー',
     report:'この投稿を通報', reportComment:'このコメントを通報', reportUser:'このユーザーを通報',
     reportTitle:'通報する', reportSub:'どんな内容か教えてね。運営だけが確認します。',
@@ -2456,6 +2457,7 @@ en:{
     delFail:"We couldn't delete your account. Please check your connection and try again.",
     delFailContact:'If this keeps happening, please contact us',
     delNeedLogin:'You need to be signed in to delete an account 🐼',
+    delPending:'We have received your deletion request. Confirming the deletion takes a little time.',
     menuAria:'Post menu',
     report:'Report post', reportComment:'Report comment', reportUser:'Report user',
     reportTitle:'Report', reportSub:'Tell us what the problem is. Only we can see this.',
@@ -5391,6 +5393,7 @@ async function ytDeleteAccount(uid){
   try{
     const {data,error}=await supabaseClient.functions.invoke('delete-account',{body:{}});
     if(error)throw error;
+    if(data&&data.status&&data.status!=='needs_retry')return {data,pending:true};
     if(!data||data.ok!==true)throw new Error((data&&data.error)||'delete failed');
     return snsOk(data);
   }catch(e){
@@ -5928,6 +5931,7 @@ function AppLogic({devId}){
     setSt({...DEF,auth:'guest'});
     setForceAuthScreen(true);
     setShowWelcomeGate(true);
+    if(r.pending)setAuthNotice(t('legal.delPending'));
     return {ok:true};
   };
 
@@ -6241,6 +6245,7 @@ function WelcomeGate({onContinue,onLogin,onRegister,onGoogleLogin,onResetPasswor
           {/* 【v46】キャッチコピーはメインビジュアル内に含まれるため、画面上は非表示にして見出しの意味だけ残す */}
           <h1 className="yg8-sr-only">{t('welcome.srTitle')}</h1>
           <p>{t('welcome.lead')}</p>
+          {authNotice&&<div className="auth-entry-msg">{authNotice}</div>}
           <button className="yg8-primary" onClick={()=>setStep(1)}>{t('welcome.ctaStart')}</button>
           <button className="yg8-secondary" onClick={onContinue}>{t('welcome.ctaTrial')}</button>
           <button className="yg8-linkbtn" onClick={()=>setStep(4)}>{t('welcome.ctaLogin')}</button>
