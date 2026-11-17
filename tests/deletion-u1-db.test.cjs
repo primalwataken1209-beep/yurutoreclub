@@ -84,6 +84,9 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
   let job;
   await t.test('users cannot see or touch the job table or the service functions',async()=>{
     await assert.rejects(()=>as(A,'select * from yt_private.account_deletion_jobs'),refused);
+    await assert.rejects(()=>as(A,'select * from yt_private.deletion_refusals'),refused);
+    for(const fn of [`public.yt_deletion_drain_mark('${P}')`,`public.yt_deletion_drained('${P}')`,`public.yt_deletion_evidence('${P}','drained')`])
+      await assert.rejects(()=>as(A,`select ${fn}`),refused,fn);
     await assert.rejects(()=>as(A,`select public.yt_deletion_accept('${B}',3600)`),refused);
     await assert.rejects(()=>as(A,`select public.yt_deletion_claim('${P}','x',60)`),refused);
     await assert.rejects(()=>as(null,`select public.yt_deletion_accept('${B}',3600)`),refused);
@@ -137,28 +140,77 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused);
     assert.equal((await as('service',`select public.yt_deletion_claim('${job}','w3',120) c`)).rows[0].c,null,'no claims after the final state');
   });
-  await t.test('the job (and so the refusal) cannot be removed, even after its review time has passed; its user id cannot be changed',async()=>{
-    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/cannot be removed/);
-    // Even when the informational review time is long past and the state is AWAITING_ASSURANCE, time alone releases nothing.
+  await t.test('R (refusal) is created with the job; the job (L) cannot be removed while R lacks its evidence, even after review time',async()=>{
+    assert.equal((await su(`select count(*)::int n from yt_private.deletion_refusals where user_id='${A}'`)).rows[0].n,1);
     await su(`update yt_private.account_deletion_jobs set hold_until=now()-interval '30 days', auth_deleted_at=now()-interval '31 days' where id='${job}'`);
-    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/cannot be removed/);
-    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused');
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/evidence is kept/);
+    for(const kind of ['drained','auth_deleted']){
+      await as('service',`select public.yt_deletion_evidence('${job}','${kind}')`);
+      await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/evidence is kept/,'still missing evidence');
+    }
     await assert.rejects(()=>su(`update yt_private.account_deletion_jobs set user_id='${B}' where id='${job}'`),/immutable/);
   });
-  await t.test('applying the draft twice changes nothing',async()=>{
-    const before=(await su(`select tablename,policyname from pg_policies where policyname like 'yt deletion:%' order by 1,2`)).rows;
-    await suExec(PREPARE);
-    assert.deepEqual((await su(`select tablename,policyname from pg_policies where policyname like 'yt deletion:%' order by 1,2`)).rows,before);
-    assert.equal(before.length,15);
+  await t.test('R evidence is set once and never changed or cleared; R itself cannot be removed; A stays refused through it',async()=>{
+    const first=(await su(`select drained_at from yt_private.deletion_refusals where user_id='${A}'`)).rows[0].drained_at;
+    await as('service',`select public.yt_deletion_evidence('${job}','drained')`);   // second call: no change
+    assert.equal((await su(`select drained_at from yt_private.deletion_refusals where user_id='${A}'`)).rows[0].drained_at.getTime(),first.getTime());
+    await assert.rejects(()=>su(`update yt_private.deletion_refusals set drained_at=null where user_id='${A}'`),/set once/);
+    await assert.rejects(()=>su(`update yt_private.deletion_refusals set refused_since=now() where user_id='${A}'`),/immutable/);
+    await assert.rejects(()=>as('service',`select public.yt_deletion_evidence('${job}','something')`),/unknown evidence kind/);
+    await as('service',`select public.yt_deletion_evidence('${job}','final_empty')`);
+    // With all evidence copied to R, L may be removed (whether to do so is a separate decision); R and the refusal remain.
+    await su(`delete from yt_private.account_deletion_jobs where id='${job}'`);
+    await assert.rejects(()=>su(`delete from yt_private.deletion_refusals where user_id='${A}'`),/cannot be removed/);
+    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused after L is gone');
   });
-  await t.test('rollback refuses while any job exists, unless acknowledged; it removes only the guards and keeps the records',async()=>{
-    await assert.rejects(()=>suExec(ROLLBACK),/deletion jobs exist/);
+  await t.test('L cannot be removed in a non-final state even if R has all evidence',async()=>{
+    const jb=(await as('service',`select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
+    for(const k of ['drained','auth_deleted','final_empty'])await as('service',`select public.yt_deletion_evidence('${jb}','${k}')`);
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${jb}'`),/evidence is kept/);
+  });
+  await t.test('drain functions: the boundary is recorded once; with no other transaction running, it is drained',async()=>{
+    const jb=(await su(`select id from yt_private.account_deletion_jobs where user_id='${B}'`)).rows[0].id;
+    const m1=(await as('service',`select public.yt_deletion_drain_mark('${jb}') v`)).rows[0].v;
+    const m2=(await as('service',`select public.yt_deletion_drain_mark('${jb}') v`)).rows[0].v;
+    assert.equal(String(m1),String(m2),'recorded once');
+    assert.equal((await as('service',`select public.yt_deletion_drained('${jb}') v`)).rows[0].v,true);
+    // A boundary far in the future is not drained (models a transaction that was still running).
+    await su(`update yt_private.account_deletion_jobs set drain_xmax=drain_xmax+1000000 where id='${jb}'`);
+    assert.equal((await as('service',`select public.yt_deletion_drained('${jb}') v`)).rows[0].v,false);
+  });
+  await t.test('sign-URL guard: creating a signed upload URL for avatars/post-images is refused for everyone; normal uploads are not',async()=>{
+    const C='cccccccc-cccc-cccc-cccc-cccccccccccc';
+    await su(`insert into auth.users(id) values ('${C}')`);
+    const withOp=async(op,pathv,sql)=>{await db.exec('reset role');
+      await db.query("select set_config('request.jwt.claim.sub',$1,false), set_config('storage.operation',$2,false), set_config('request.path',$3,false)",[C,op,pathv]);
+      await db.exec('set role authenticated');return db.query(sql);};
+    const ins=`insert into storage.objects(bucket_id,name) values ('avatars','${C}/avatar.jpg')`;
+    await assert.rejects(()=>withOp('storage.object.sign_upload_url','/object/upload/sign/avatars/x',ins),refused,'by operation');
+    await assert.rejects(()=>withOp('','/object/upload/sign/avatars/x',ins),refused,'by path');
+    await assert.rejects(()=>withOp('storage.object.sign_upload_url','',`insert into storage.objects(bucket_id,name) values ('post-images','${C}/${'99999999-9999-4999-8999-'+C.slice(-12)}.jpg')`),refused,'post-images too');
+    await withOp('storage.object.upload','/object/avatars/'+C+'/avatar.jpg',ins);   // normal upload of a user with no job: allowed
+    assert.equal((await withOp('storage.object.sign_upload_url','/object/upload/sign/avatars/x',`update storage.objects set owner_id='x' where name='${C}/avatar.jpg' returning id`)).rows.length,0,'upsert path refused');
+    await db.query("select set_config('storage.operation','',false), set_config('request.path','',false)");
+  });
+  await t.test('applying the draft twice changes nothing',async()=>{
+    const q=`select tablename,policyname from pg_policies where policyname like 'yt deletion:%' or policyname like 'yt no signed upload urls%' order by 1,2`;
+    const before=(await su(q)).rows;
+    await suExec(PREPARE);
+    assert.deepEqual((await su(q)).rows,before);
+    assert.equal(before.length,17);
+  });
+  await t.test('rollback refuses while refusals exist, unless acknowledged; removes only the deletion guards; keeps R, L and the sign-URL guard',async()=>{
+    await assert.rejects(()=>suExec(ROLLBACK),/deletion refusals or jobs exist/);
     await db.exec('rollback');   // the failed file left its transaction open
     assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt deletion:%'`)).rows[0].n,15,'refused rollback changed nothing');
     await su(`select set_config('yt.rollback_reopens_pending_users','acknowledged',false)`);
     await suExec(ROLLBACK);
     assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt deletion:%'`)).rows[0].n,0);
-    assert.equal((await su('select count(*)::int n from yt_private.account_deletion_jobs')).rows[0].n,1,'records kept');
+    assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt no signed upload urls%'`)).rows[0].n,2,'sign-URL guard kept');
+    assert.equal((await su('select count(*)::int n from yt_private.deletion_refusals')).rows[0].n,2,'refusals kept');
     await as(B,`insert into public.posts(user_id,body) values ('${B}','after rollback')`);
+    await su(`select set_config('yt.remove_sign_url_guard','acknowledged',false)`);
+    await suExec(ROLLBACK);
+    assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt no signed upload urls%'`)).rows[0].n,0,'removed only on its own acknowledgement');
   });
 });

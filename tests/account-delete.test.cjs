@@ -32,6 +32,9 @@ function setup(opts={}){
       if(!j||j.state==='AWAITING_ASSURANCE'||(j.lease_owner&&j.lease_expires_at>now()&&j.lease_owner!==a.p_owner))return {data:null,error:null};
       j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
       return {data:{generation:j.generation,state:j.state,user_id:j.user_id},error:null};}
+    if(name==='yt_deletion_drain_mark'){if(fail.drainMark)return {data:null,error:{message:'x'}};if(!j)return {data:null,error:{message:'job not found'}};if(j.drain==null)j.drain=1;return {data:j.drain,error:null};}
+    if(name==='yt_deletion_drained'){if(fail.drainCheck)return {data:null,error:{message:'x'}};return {data:!!j&&j.drain!=null&&!opts.notDrained,error:null};}
+    if(name==='yt_deletion_evidence'){if(fail.evidence===a.p_kind)return {data:null,error:{message:'x'}};j.evidence=j.evidence||{};if(!j.evidence[a.p_kind])j.evidence[a.p_kind]=calls.length;return {data:true,error:null};}
     if(name==='yt_deletion_advance'){
       const ok=!!j&&j.generation===a.p_generation&&j.lease_owner===a.p_owner&&j.lease_expires_at>now()+a.p_min_lease_seconds*1000&&a.p_from.includes(j.state);
       if(!ok)return {data:false,error:null};
@@ -66,7 +69,7 @@ function setup(opts={}){
     };}},
     from(table){return {delete(){return {eq:async(col,id)=>{calls.push(['db',table,col,id]);if(hooks.onDbDelete)hooks.onDbDelete(table,store,job());return {error:null};}};}};}
   };
-  const env={SUPABASE_URL:'http://offline.invalid',SERVICE_ROLE_KEY:KEY,YT_ACCESS_TOKEN_TTL_SECONDS:'3600',YT_DELETION_LEASE_SECONDS:'120',...(opts.env||{})};
+  const env={SUPABASE_URL:'http://offline.invalid',SERVICE_ROLE_KEY:KEY,YT_ACCESS_TOKEN_TTL_SECONDS:'3600',YT_DELETION_LEASE_SECONDS:'460',YT_FUNCTION_MAX_SECONDS:'400',...(opts.env||{})};
   vm.runInNewContext(code,{Request,Response,console:{log(){},warn(){},error(){}},crypto,
     createClient:(url,key)=>{assert.equal(url,'http://offline.invalid');assert.equal(key,KEY);return client;},
     Deno:{env:{get:k=>env[k]},serve:fn=>handler=fn}},{timeout:5000});
@@ -169,7 +172,8 @@ test('operator continuation: service key + job_id only; no user token check, no 
   assert.ok(s.calls.filter(c=>c[0]==='auth').every(c=>c[1]===uid),'target comes from the job');
 });
 test('missing token-lifetime or lease settings: refused before anything happens',async()=>{
-  for(const env of [{YT_ACCESS_TOKEN_TTL_SECONDS:''},{YT_DELETION_LEASE_SECONDS:'30'},{YT_ACCESS_TOKEN_TTL_SECONDS:'abc'}]){
+  for(const env of [{YT_ACCESS_TOKEN_TTL_SECONDS:''},{YT_DELETION_LEASE_SECONDS:'30'},{YT_ACCESS_TOKEN_TTL_SECONDS:'abc'},
+                    {YT_FUNCTION_MAX_SECONDS:''},{YT_DELETION_LEASE_SECONDS:'400'},{YT_DELETION_LEASE_SECONDS:'120'}]){
     const s=setup({env});const r=await s.run();
     assert.deepEqual([r.status,r.body.step],[500,'config']);assert.equal(s.calls.length,0);
   }
@@ -199,6 +203,31 @@ test('a failure to take the lease right after acceptance is still "accepted" (th
   const s=setup({fail:{claim:true}});const r=await s.run();
   assert.deepEqual([r.body.status,r.body.step],['needs_retry','claim']);assert.equal(s.jobs.size,1);
   assert.deepEqual(s.calls.find(c=>c[0]==='signOut'),['signOut','global']);
+});
+test('drain: until earlier transactions have ended, nothing is deleted and the reply is accepted/in progress (no waiting time assumed)',async()=>{
+  const s=setup({objects:{avatars:[`${uid}/a.jpg`]},notDrained:true});
+  const r=await s.run();
+  assert.deepEqual([r.body.accepted,r.body.status,r.body.step],[true,'in_progress','draining']);
+  assert.equal(kinds(s).length,0,'no Storage/row/Auth action');assert.equal(s.store.avatars.size,1);
+  assert.equal(s.calls.some(c=>c[1]==='yt_deletion_claim'),false,'does not even take the lease');
+  assert.equal(s.job().evidence,undefined,'no evidence recorded');
+});
+test('drain mark/check failures are accepted needs_retry and delete nothing',async()=>{
+  for(const fail of [{drainMark:true},{drainCheck:true}]){
+    const s=setup({objects:{avatars:[`${uid}/a.jpg`]},fail});const r=await s.run();
+    assert.equal(r.body.accepted,true);assert.equal(r.body.status,'needs_retry');assert.equal(kinds(s).length,0);
+  }
+});
+test('evidence for the refusal record is written in order: drained → auth_deleted → final_empty, and only after the step itself',async()=>{
+  const s=setup({objects:{avatars:[`${uid}/a.jpg`]}});await s.run();
+  const e=s.job().evidence;assert.ok(e.drained<e.auth_deleted&&e.auth_deleted<e.final_empty);
+  const authCall=s.calls.findIndex(c=>c[0]==='auth');assert.ok(authCall>=0&&authCall<e.auth_deleted);
+  const drainedEvent=s.calls.findIndex(c=>c[1]==='yt_deletion_evidence');const firstRemove=s.calls.findIndex(c=>c[0]==='remove');
+  assert.ok(drainedEvent<firstRemove,'drained evidence before any deletion');
+});
+test('an image found after Auth deletion: no final_empty evidence is recorded',async()=>{
+  const s=setup({hooks:{afterDeleteUser:st=>st['post-images'].add(`${uid}/late.jpg`)}});await s.run();
+  assert.ok(s.job().evidence.auth_deleted);assert.equal(s.job().evidence.final_empty,undefined);
 });
 test('a failed session sign-out is recorded but does not stop the deletion (the job refuses writes either way)',async()=>{
   const s=setup({fail:{signOut:true}});

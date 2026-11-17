@@ -44,9 +44,41 @@ create table if not exists yt_private.account_deletion_jobs(
 );
 revoke all on yt_private.account_deletion_jobs from public, anon, authenticated;
 
--- The target user never changes, and a job row is never removed by this draft: the row is what refuses the user's writes,
--- and no time limit or operator mark proves that an upload which passed its check earlier cannot still complete.
--- Releasing the refusal needs a separately reviewed and approved method; until then the row (user id + step results) stays.
+-- Snapshot boundary for the "drain" check (see yt_deletion_drain_mark), kept in the detailed job record.
+alter table yt_private.account_deletion_jobs add column if not exists drain_xmax bigint;
+
+-- R: the minimal refusal record. Only this table decides whether a user's writes are refused. It holds the user id, when the
+-- refusal began, and the evidence timestamps needed before any future release could even be considered. No release exists here:
+-- no time limit or operator mark proves that every upload which passed its check earlier has ended.
+create table if not exists yt_private.deletion_refusals(
+  user_id         uuid primary key,
+  refused_since   timestamptz not null default now(),
+  drained_at      timestamptz,   -- every transaction in progress at acceptance had ended (yt_deletion_drained)
+  auth_deleted_at timestamptz,   -- the Auth user was deleted
+  final_empty_at  timestamptz    -- the user's Storage prefixes were listed empty after the Auth deletion (an observation, not a proof)
+);
+revoke all on yt_private.deletion_refusals from public, anon, authenticated;
+-- Evidence only moves forward (set once, never cleared or changed); user id and start never change; a refusal is never removed.
+create or replace function yt_private.refusals_guard() returns trigger language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'deletion refusal: rows cannot be removed (no proven release condition)'; end if;
+  if new.user_id <> old.user_id or new.refused_since <> old.refused_since then
+    raise exception 'deletion refusal: user_id and refused_since are immutable';
+  end if;
+  if (old.drained_at is not null and new.drained_at is distinct from old.drained_at)
+     or (old.auth_deleted_at is not null and new.auth_deleted_at is distinct from old.auth_deleted_at)
+     or (old.final_empty_at is not null and new.final_empty_at is distinct from old.final_empty_at) then
+    raise exception 'deletion refusal: evidence can be set once and never changed';
+  end if;
+  return new;
+end
+$$;
+drop trigger if exists refusals_guard on yt_private.deletion_refusals;
+create trigger refusals_guard before update or delete on yt_private.deletion_refusals
+  for each row execute function yt_private.refusals_guard();
+
+-- L (this detailed job record) may be removed only after its steps finished AND R already holds all of its evidence, so removing L
+-- never removes evidence that an unresolved refusal still needs. Whether and when to remove L is a separate (unapproved) decision.
 create or replace function yt_private.jobs_guard() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'UPDATE' then
@@ -54,7 +86,12 @@ begin
     new.updated_at := now();
     return new;
   end if;
-  raise exception 'account deletion job: rows cannot be removed (no proven release condition)';
+  if old.state = 'AWAITING_ASSURANCE' and exists (
+       select 1 from yt_private.deletion_refusals r where r.user_id = old.user_id
+          and r.drained_at is not null and r.auth_deleted_at is not null and r.final_empty_at is not null) then
+    return old;
+  end if;
+  raise exception 'account deletion job: cannot be removed before its evidence is kept in the refusal record';
 end
 $$;
 drop trigger if exists jobs_guard on yt_private.account_deletion_jobs;
@@ -64,7 +101,7 @@ create trigger jobs_guard before update or delete on yt_private.account_deletion
 -- Used by the restrictive policies below. No arguments: a caller learns only whether their own writes are allowed.
 create or replace function yt_private.write_allowed() returns boolean
   language sql stable security definer set search_path = '' as $$
-  select not exists (select 1 from yt_private.account_deletion_jobs j where j.user_id = auth.uid())
+  select not exists (select 1 from yt_private.deletion_refusals r where r.user_id = auth.uid())
 $$;
 revoke all on function yt_private.write_allowed() from public;
 grant usage on schema yt_private to anon, authenticated;
@@ -76,6 +113,8 @@ create or replace function public.yt_deletion_accept(p_user uuid, p_token_ttl_se
 declare v_id uuid;
 begin
   if p_user is null then raise exception 'user required'; end if;
+  -- The refusal (R) and the job (L) are created in the same transaction.
+  insert into yt_private.deletion_refusals(user_id) values (p_user) on conflict (user_id) do nothing;
   insert into yt_private.account_deletion_jobs(user_id, token_ttl_seconds) values (p_user, p_token_ttl_seconds)
     on conflict (user_id) do nothing;
   select id into v_id from yt_private.account_deletion_jobs where user_id = p_user;
@@ -122,6 +161,58 @@ begin
 end
 $$;
 
+-- Drain: Storage (public source 14b42c3, uploader.ts 246-304; added in f31599e) re-checks the caller's policies and writes the object
+-- row in ONE transaction at completion. Record the upper bound of the transaction ids that could exist when the refusal became visible;
+-- once the oldest running transaction is past it, every completion that checked policies before the refusal has ended (committed and
+-- visible to a listing, or rolled back). Called after acceptance has committed; only the first call records the bound.
+-- Valid only if the running Storage version re-checks at completion (not visible on staging; unconfirmed) and only for paths that
+-- re-check as the user (not for signed uploads, which run as the service user: closed separately by the sign-URL guard below).
+create or replace function public.yt_deletion_drain_mark(p_job uuid) returns bigint
+  language plpgsql security definer set search_path = '' as $$
+declare v bigint;
+begin
+  update yt_private.account_deletion_jobs
+     set drain_xmax = (pg_snapshot_xmax(pg_current_snapshot()))::text::bigint
+   where id = p_job and drain_xmax is null;
+  select drain_xmax into v from yt_private.account_deletion_jobs where id = p_job;
+  if v is null then raise exception 'job not found'; end if;
+  return v;
+end
+$$;
+create or replace function public.yt_deletion_drained(p_job uuid) returns boolean
+  language sql stable security definer set search_path = '' as $$
+  select j.drain_xmax is not null and (pg_snapshot_xmin(pg_current_snapshot()))::text::bigint >= j.drain_xmax
+    from yt_private.account_deletion_jobs j where j.id = p_job
+$$;
+-- Evidence for R, set once per kind (drained / auth_deleted / final_empty) for the job's user.
+create or replace function public.yt_deletion_evidence(p_job uuid, p_kind text) returns boolean
+  language plpgsql security definer set search_path = '' as $$
+declare v_user uuid;
+begin
+  select user_id into v_user from yt_private.account_deletion_jobs where id = p_job;
+  if v_user is null then raise exception 'job not found'; end if;
+  if p_kind = 'drained' then
+    update yt_private.deletion_refusals set drained_at = now() where user_id = v_user and drained_at is null;
+  elsif p_kind = 'auth_deleted' then
+    update yt_private.deletion_refusals set auth_deleted_at = now() where user_id = v_user and auth_deleted_at is null;
+  elsif p_kind = 'final_empty' then
+    update yt_private.deletion_refusals set final_empty_at = now() where user_id = v_user and final_empty_at is null;
+  else
+    raise exception 'unknown evidence kind';
+  end if;
+  return true;
+end
+$$;
+do $svc$
+declare f text;
+begin
+  foreach f in array array['public.yt_deletion_drain_mark(uuid)','public.yt_deletion_drained(uuid)','public.yt_deletion_evidence(uuid,text)'] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+    execute format('grant execute on function %s to service_role', f);
+  end loop;
+end
+$svc$;
+
 revoke all on function public.yt_deletion_accept(uuid, integer) from public, anon, authenticated;
 revoke all on function public.yt_deletion_claim(uuid, text, integer) from public, anon, authenticated;
 revoke all on function public.yt_deletion_advance(uuid, bigint, text, text[], text, jsonb, integer, boolean) from public, anon, authenticated;
@@ -165,4 +256,26 @@ begin
   end loop;
 end
 $guards$;
+
+-- Sign-URL guard (all users, not only those being deleted): refuse creating signed UPLOAD URLs for avatars/post-images.
+-- Public source 14b42c3: a signed upload (and signed TUS) is checked against the user's policies only when the URL is created
+-- (object.ts 1986-1994, operation 'storage.object.sign_upload_url', route POST /object/upload/sign/...); the upload itself runs as the
+-- service user (object/index.ts 47-55, db.ts 94-112), so a refusal added later cannot stop it. Storage sets storage.operation and
+-- request.path for every request (postgres/scope.ts 15-24, 78; present since at least e07d10b). The app never creates signed upload
+-- URLs (it uploads directly and only signs DOWNLOAD URLs), so normal saving is unaffected. If the running Storage version did not set
+-- these values, this guard would not trigger (fail open); that must be confirmed on staging with an ordinary account before relying on it.
+-- URLs created before this guard existed are not affected by it: invalidating them needs a one-time URL signing key rotation (separate approval).
+drop policy if exists "yt no signed upload urls insert" on storage.objects;
+drop policy if exists "yt no signed upload urls update" on storage.objects;
+create policy "yt no signed upload urls insert" on storage.objects as restrictive for insert to anon, authenticated
+  with check (bucket_id not in ('avatars','post-images')
+    or (coalesce(current_setting('storage.operation', true), '') <> 'storage.object.sign_upload_url'
+        and coalesce(current_setting('request.path', true), '') not like '%/object/upload/sign/%'));
+create policy "yt no signed upload urls update" on storage.objects as restrictive for update to anon, authenticated
+  using (bucket_id not in ('avatars','post-images')
+    or (coalesce(current_setting('storage.operation', true), '') <> 'storage.object.sign_upload_url'
+        and coalesce(current_setting('request.path', true), '') not like '%/object/upload/sign/%'))
+  with check (bucket_id not in ('avatars','post-images')
+    or (coalesce(current_setting('storage.operation', true), '') <> 'storage.object.sign_upload_url'
+        and coalesce(current_setting('request.path', true), '') not like '%/object/upload/sign/%'));
 commit;

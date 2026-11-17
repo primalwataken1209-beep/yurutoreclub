@@ -60,7 +60,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const TTL = Number(Deno.env.get('YT_ACCESS_TOKEN_TTL_SECONDS') ?? '');
   const LEASE = Number(Deno.env.get('YT_DELETION_LEASE_SECONDS') ?? '');
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !Number.isInteger(TTL) || TTL <= 0 || !Number.isInteger(LEASE) || LEASE < 60) {
+  // The Edge Function's maximum run time for this project's plan (Supabase docs, Limits: 150 s Free, 400 s paid). The lease must be
+  // longer, so that when a lease expires the worker that held it has already been stopped by the platform. (Whether a request it sent
+  // just before being stopped can still take effect afterwards is not documented; the steps after Auth deletion re-check for that.)
+  const MAX_RUN = Number(Deno.env.get('YT_FUNCTION_MAX_SECONDS') ?? '');
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !Number.isInteger(TTL) || TTL <= 0 || !Number.isInteger(LEASE) || LEASE < 60
+      || !Number.isInteger(MAX_RUN) || MAX_RUN <= 0 || LEASE <= MAX_RUN) {
     console.error('[delete-account] 設定が不足しています');
     return json({ ok: false, step: 'config', error: 'Server is not configured' }, 500);
   }
@@ -97,6 +102,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!ACCEPTED_STATUSES.includes(status)) status = 'needs_operator';
     return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status, ...extra });
   };
+
+  // Drain boundary: recorded once, after the refusal has committed (the accept call above is its own transaction).
+  const { error: markErr } = await admin.rpc('yt_deletion_drain_mark', { p_job: jobId });
+  if (markErr) return accepted('needs_retry', { step: 'drain_mark' });
+  // Until every transaction that was running at that point has ended, do not start deleting: a completion that checked the
+  // user's policies before the refusal may still be committing its object row. No waiting time is assumed; the call simply returns
+  // "in progress" and the operator (or the user's next call) continues later.
+  const { data: drained, error: drainErr } = await admin.rpc('yt_deletion_drained', { p_job: jobId });
+  if (drainErr) return accepted('needs_retry', { step: 'drain_check' });
+  if (drained !== true) return accepted('in_progress', { step: 'draining' });
+  const evidence = async (kind: string) => { const { error } = await admin.rpc('yt_deletion_evidence', { p_job: jobId, p_kind: kind }); return !error; };
+  if (!(await evidence('drained'))) return accepted('needs_retry', { step: 'evidence_drained' });
 
   // ── 排他を取る（取れなければ別の処理が進めている） ──
   const owner = crypto.randomUUID();
@@ -181,10 +198,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!(await advance(['AUTH_DELETING'], 'AUTH_DELETING', { check: 'before_auth_delete' }))) return stopped();
     const { error: authErr } = await admin.auth.admin.deleteUser(uid);
     if (authErr && !isUserNotFound(authErr)) return await failed('auth_delete', authErr);   // e.g. still owns objects → retry from Storage
+    if (!(await evidence('auth_deleted'))) return await failed('evidence_auth_deleted', 'could not record', true);
 
-    // ── Auth の後の確認。0 件でも「完了」ではなく確認待ち ──
+    // ── Auth の後の確認。0 件でも「完了」ではなく確認待ち（観測であって保証ではない） ──
     try { left = await remaining(); } catch (e) { return await failed('storage_after_auth', e, true); }
     if (left !== 0) return await failed('storage_after_auth', `objects after auth deletion: ${left}`, true);
+    if (!(await evidence('final_empty'))) return await failed('evidence_final_empty', 'could not record', true);
     if (!(await advance(['AUTH_DELETING'], 'AWAITING_ASSURANCE', { remaining_after_auth: 0 }, true))) return stopped();
     return accepted('awaiting_assurance');
   } catch (e) {
