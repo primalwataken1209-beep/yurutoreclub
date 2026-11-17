@@ -233,14 +233,61 @@ test('report retention draft (synthetic data, isolated)',async t=>{
     const snap=async()=>(await su('select id,row_version,legacy_review_required,migration_review_due_at from public.reports order by id')).rows;
     const before=await snap();await suExec(PREPARE);assert.deepEqual(await snap(),before);
   });
-  await t.test('rollback removes functions/triggers, restores the earlier table-wide INSERT grant, keeps the columns and values',async()=>{
-    const before=(await su('select count(*)::int n, count(closed_at)::int c from public.reports')).rows[0];
+  await t.test('re-check rejects malformed items (never eligible): missing/null/non-integer/negative version, bad id, non-object',async()=>{
+    // A real, currently eligible candidate, so that only the malformed field can make the answer false.
+    const q='66666666-6666-6666-6666-666666666666';
+    await su(`insert into public.posts(id,user_id,body) values ('${q}','${B}','q')`);
+    await su(`insert into public.reports(reporter_user_id,target_type,target_id,reason) values ('${B}','post','${q}','spam')`);
+    const id=(await su(`select id from public.reports where target_id='${q}'`)).rows[0].id;
+    await svc(`public.yt_report_close('${id}','actioned','handled','owner')`);
+    const ver=Number((await row(id)).row_version);
+    const ok=(await as('service','select * from public.yt_report_deletion_recheck($1,$2)',[JSON.stringify([{id,row_version:ver}]),later])).rows[0];
+    assert.deepEqual([ok.eligible,ok.reason],[true,'ok'],'baseline is eligible');
+    const bad=[{id},{id,row_version:null},{id,row_version:String(ver)},{id,row_version:ver+0.5},{id,row_version:-1},{id,row_version:true},
+      {row_version:ver},{id:null,row_version:ver},{id:'not-a-uuid',row_version:ver},{id:42,row_version:ver},'just text',null,[id,ver]];
+    const res=(await as('service','select * from public.yt_report_deletion_recheck($1,$2)',[JSON.stringify(bad),later])).rows;
+    assert.equal(res.length,bad.length);
+    for(const [i,r] of res.entries())assert.deepEqual([r.eligible,r.reason],[false,'invalid_item'],JSON.stringify(bad[i]));
+    for(const notArray of ['{}','null','"x"'])await assert.rejects(()=>as('service',`select * from public.yt_report_deletion_recheck('${notArray}'::jsonb)`),/must be a JSON array/);
+  });
+  await t.test('safe stop (rollback): operations stop, protections stay (5-column reports work, management columns cannot be set), data kept',async()=>{
+    const snap=async()=>(await su('select id,row_version,closed_at,retention_until,retention_hold,legacy_review_required from public.reports order by id')).rows;
+    const before=await snap();
     await suExec(ROLLBACK);
-    assert.deepEqual((await su('select count(*)::int n, count(closed_at)::int c from public.reports')).rows[0],before);
-    assert.equal((await su(`select count(*)::int n from pg_proc where proname like 'yt_report_%'`)).rows[0].n,0);
-    const grants=(await su(`select privilege_type from information_schema.role_table_grants where table_schema='public' and table_name='reports' and grantee='authenticated'`)).rows.map(r=>r.privilege_type);
-    assert.deepEqual(grants,['INSERT']);
+    assert.deepEqual(await snap(),before,'data unchanged');
+    assert.equal((await su(`select count(*)::int n from pg_proc where proname like 'yt_report_%'`)).rows[0].n,0,'operations stopped');
+    assert.deepEqual((await su(`select privilege_type from information_schema.role_table_grants where table_schema='public' and table_name='reports' and grantee in ('anon','authenticated')`)).rows,[],'no table-wide grant');
     await su(`insert into public.posts(id,user_id,body) values ('22222222-2222-2222-2222-222222222222','${B}','another post')`);
-    await as(B,`insert into public.reports(reporter_user_id,target_type,target_id,reason) values (auth.uid(),'post','22222222-2222-2222-2222-222222222222','spam')`);
+    await as(B,`insert into public.reports(reporter_user_id,target_type,target_id,reason,note) values (auth.uid(),'post','22222222-2222-2222-2222-222222222222','spam','n')`);
+    const r=(await su(`select * from public.reports where target_id='22222222-2222-2222-2222-222222222222'`)).rows[0];
+    assert.deepEqual([r.closed_at,r.retention_hold,Number(r.row_version)],[null,false,0],'defaults still applied');
+    assert.ok(r.review_due_at&&Math.abs(r.review_due_at-(r.created_at.getTime()+14*DAY))<1000,'insert trigger still sets the review date from receipt');
+    for(const sql of [
+      `insert into public.reports(reporter_user_id,target_type,target_id,reason,closed_at) values (auth.uid(),'post','${P}','spam',now())`,
+      `insert into public.reports(reporter_user_id,target_type,target_id,reason,retention_until,retention_hold) values (auth.uid(),'post','${P}','spam',now(),false)`,
+      `insert into public.reports(reporter_user_id,target_type,target_id,reason,row_version) values (auth.uid(),'post','${P}','spam',99)`,
+      `update public.reports set retention_hold=true`]) await assert.rejects(()=>as(B,sql),refused,sql);
+    // row_version keeps counting while stopped (history not broken), and cannot be reset.
+    const v0=Number(r.row_version);await su(`update public.reports set note='edited while stopped' where id='${r.id}'`);
+    await su(`update public.reports set row_version=0 where id='${r.id}'`);
+    assert.equal(Number((await row(r.id)).row_version),v0+1);
+  });
+  await t.test('re-applying after the safe stop restores the operations without re-migrating or resetting versions',async()=>{
+    const snap=async()=>(await su('select id,row_version,review_due_at,migration_review_due_at,legacy_review_required,closed_at from public.reports order by id')).rows;
+    const before=await snap();
+    await suExec(PREPARE);
+    assert.deepEqual(await snap(),before,'no migration, versions continue');
+    assert.ok((await as('service','select * from public.yt_report_review_list()')).rows.length>0,'operations back');
+    await assert.rejects(()=>as(B,`insert into public.reports(reporter_user_id,target_type,target_id,reason,closed_at) values (auth.uid(),'post','${P}','spam',now())`),refused);
+  });
+  await t.test('the safe stop refuses to run if the protections were removed by hand (it must not open the table)',async()=>{
+    await su(`drop trigger yt_reports_before_insert on public.reports`);
+    await assert.rejects(()=>suExec(ROLLBACK),/protections \(triggers\) are missing/);
+    await db.exec('rollback');
+    assert.ok((await su(`select count(*)::int n from pg_proc where proname like 'yt_report_%'`)).rows[0].n>0,'refused stop changed nothing');
+    await suExec(PREPARE);   // restore the trigger
+    await su(`grant insert on public.reports to authenticated`);
+    await assert.rejects(()=>suExec(ROLLBACK),/table-wide grant/);
+    await db.exec('rollback');
   });
 });

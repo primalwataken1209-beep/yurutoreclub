@@ -203,18 +203,33 @@ create or replace function public.yt_report_deletion_candidates(p_now timestampt
 $$;
 
 -- Re-check listed candidates under row locks, with the same rule plus an unchanged row_version. Nothing is deleted.
--- p_items: [{"id": "...", "row_version": n}, ...]
+-- p_items: a JSON array of {"id": "<uuid>", "row_version": <non-negative integer>}. Any item that is not exactly that shape
+-- (missing/null/non-integer/negative version, missing/malformed id, non-object) is answered eligible = false, reason 'invalid_item'.
+-- The row locks taken here end when this call's transaction ends. A future real deletion must evaluate the same rule and the
+-- unchanged row_version again inside the SAME transaction as its DELETE; a separate earlier call to this function is not enough.
 create or replace function public.yt_report_deletion_recheck(p_items jsonb, p_now timestamptz default now())
   returns table(id uuid, eligible boolean, reason text)
   language plpgsql security definer set search_path = '' as $$
-declare it jsonb; r public.reports;
+declare it jsonb; r public.reports; v_id uuid; v_ver bigint; v_raw jsonb;
 begin
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then raise exception 'p_items must be a JSON array'; end if;
   for it in select * from jsonb_array_elements(p_items) loop
-    select * into r from public.reports x where x.id = (it ->> 'id')::uuid for update;
-    id := (it ->> 'id')::uuid;
+    v_id := null; v_ver := null;
+    if jsonb_typeof(it) = 'object'
+       and jsonb_typeof(it -> 'id') = 'string'
+       and (it ->> 'id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+      v_id := (it ->> 'id')::uuid;
+    end if;
+    v_raw := case when jsonb_typeof(it) = 'object' then it -> 'row_version' end;
+    if v_raw is not null and jsonb_typeof(v_raw) = 'number' and (v_raw #>> '{}') ~ '^[0-9]{1,18}$' then
+      v_ver := (v_raw #>> '{}')::bigint;
+    end if;
+    id := v_id;
+    if v_id is null or v_ver is null then eligible := false; reason := 'invalid_item'; return next; continue; end if;
+    select * into r from public.reports x where x.id = v_id for update;
     if not found then eligible := false; reason := 'missing'; return next; continue; end if;
-    if r.row_version <> (it ->> 'row_version')::bigint then eligible := false; reason := 'changed_after_listing'; return next; continue; end if;
-    if not yt_private.report_deletable(r, p_now) then eligible := false; reason := 'not_deletable_now'; return next; continue; end if;
+    if r.row_version is distinct from v_ver then eligible := false; reason := 'changed_after_listing'; return next; continue; end if;
+    if yt_private.report_deletable(r, p_now) is not true then eligible := false; reason := 'not_deletable_now'; return next; continue; end if;
     eligible := true; reason := 'ok'; return next;
   end loop;
 end
