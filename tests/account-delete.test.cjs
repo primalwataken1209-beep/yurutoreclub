@@ -32,6 +32,8 @@ function setup(opts={}){
       if(!j||j.state==='AWAITING_ASSURANCE'||(j.lease_owner&&j.lease_expires_at>now()&&j.lease_owner!==a.p_owner))return {data:null,error:null};
       j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
       return {data:{generation:j.generation,state:j.state,user_id:j.user_id},error:null};}
+    if(name==='yt_deletion_sweep_target'){return {data:j&&j.authDeleted&&['AWAITING_ASSURANCE','NEEDS_OPERATOR'].includes(j.state)?j.user_id:null,error:null};}
+    if(name==='yt_deletion_sweep_record'){if(!(j&&j.authDeleted))return {data:false,error:null};j.sweeps=(j.sweeps||[]);j.sweeps.push([a.p_removed,a.p_remaining]);return {data:true,error:null};}
     if(name==='yt_deletion_drain_mark'){if(fail.drainMark)return {data:null,error:{message:'x'}};if(!j)return {data:null,error:{message:'job not found'}};if(j.drain==null)j.drain=1;return {data:j.drain,error:null};}
     if(name==='yt_deletion_drained'){if(fail.drainCheck)return {data:null,error:{message:'x'}};return {data:!!j&&j.drain!=null&&!opts.notDrained,error:null};}
     if(name==='yt_deletion_evidence'){if(fail.evidence===a.p_kind)return {data:null,error:{message:'x'}};j.evidence=j.evidence||{};if(!j.evidence[a.p_kind])j.evidence[a.p_kind]=calls.length;return {data:true,error:null};}
@@ -39,7 +41,7 @@ function setup(opts={}){
       const ok=!!j&&j.generation===a.p_generation&&j.lease_owner===a.p_owner&&j.lease_expires_at>now()+a.p_min_lease_seconds*1000&&a.p_from.includes(j.state);
       if(!ok)return {data:false,error:null};
       j.state=a.p_to;j.log.push({to:a.p_to,...a.p_note});
-      if(a.p_auth_deleted)j.hold_until=now()+(j.ttl+300)*1000;
+      if(a.p_auth_deleted){j.hold_until=now()+(j.ttl+300)*1000;j.authDeleted=true;}
       if(['AWAITING_ASSURANCE','NEEDS_RETRY','NEEDS_OPERATOR'].includes(a.p_to)){j.lease_owner=null;j.lease_expires_at=0;}
       return {data:true,error:null};}
     throw new Error('unknown rpc '+name);
@@ -62,6 +64,7 @@ function setup(opts={}){
       async list(prefix,{limit,offset}){assert.equal(prefix,uid);calls.push(['list',bucket,offset]);
         if(fail.list&&fail.list[bucket])return {data:null,error:fail.list[bucket]};
         const names=[...store[bucket]].filter(n=>n.startsWith(uid+'/')).map(n=>n.slice(uid.length+1)).sort();
+        if(names.length===0&&hooks.onEmptyList)hooks.onEmptyList(bucket,store);   // e.g. an object that lands right after an empty listing
         return {data:names.slice(offset,offset+limit).map(name=>({name,id:'obj'})),error:null};},
       async remove(paths){calls.push(['remove',bucket,paths.length]);
         if(fail.remove&&fail.remove[bucket])return {error:fail.remove[bucket]};
@@ -228,6 +231,39 @@ test('evidence for the refusal record is written in order: drained → auth_dele
 test('an image found after Auth deletion: no final_empty evidence is recorded',async()=>{
   const s=setup({hooks:{afterDeleteUser:st=>st['post-images'].add(`${uid}/late.jpg`)}});await s.run();
   assert.ok(s.job().evidence.auth_deleted);assert.equal(s.job().evidence.final_empty,undefined);
+});
+test('sweep after the Auth deletion: removes a late object, records it, stays awaiting assurance; touches nothing else',async()=>{
+  const s=setup({objects:{avatars:[`${uid}/a.jpg`]}});await s.run();
+  const id=s.job().id;
+  s.store['post-images'].add(`${uid}/late-signed-upload.jpg`);   // e.g. a signed upload that was already streaming
+  const before=s.calls.length;
+  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
+  assert.deepEqual([r.status,r.body.accepted,r.body.status,r.body.step,r.body.removed,r.body.remaining],[200,true,'awaiting_assurance','sweep',1,0]);
+  assert.equal(s.store['post-images'].size,0);
+  const after=s.calls.slice(before);
+  assert.equal(after.some(c=>['auth','db','getUser','signOut'].includes(c[0])),false,'delete-only on Storage');
+  assert.equal(after.some(c=>c[1]==='yt_deletion_claim'),false,'no lease needed (delete-only, repeatable)');
+  assert.deepEqual(s.job().sweeps,[[1,0]]);
+  const again=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
+  assert.deepEqual([again.body.status,again.body.removed],['awaiting_assurance',0],'an empty sweep is only recorded, not a completion');
+  assert.deepEqual(s.job().sweeps,[[1,0],[0,0]]);
+});
+test('sweep: an object that lands right after the sweep\'s empty listing makes it report needs_operator, not awaiting assurance',async()=>{
+  const opts={objects:{avatars:[`${uid}/a.jpg`]},hooks:{}};
+  const s=setup(opts);await s.run();
+  let once=true;opts.hooks.onEmptyList=(b,st)=>{if(once&&b==='post-images'){once=false;st['post-images'].add(`${uid}/racing.jpg`);}};
+  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
+  assert.deepEqual([r.body.status,r.body.remaining],['needs_operator',1]);
+  assert.deepEqual(s.job().sweeps.at(-1),[0,1]);
+});
+test('sweep is refused for a job whose account is not deleted yet, and is not available with a user token',async()=>{
+  const s=setup({fail:{deleteUser:{message:'temporary'}}});await s.run();
+  const id=s.job().id;
+  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
+  assert.deepEqual([r.status,r.body.step],[409,'sweep_target']);
+  const u=setup({objects:{avatars:[`${uid}/a.jpg`]}});
+  const ru=await u.run({body:{sweep:true}});   // user token: normal acceptance path, the flag is ignored
+  assert.equal(ru.body.status,'awaiting_assurance');assert.equal(u.job().sweeps,undefined);
 });
 test('a failed session sign-out is recorded but does not stop the deletion (the job refuses writes either way)',async()=>{
   const s=setup({fail:{signOut:true}});

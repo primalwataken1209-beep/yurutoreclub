@@ -78,10 +78,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let jobId: string | null = null;
   let sessions = 'not_requested';
   if (token === SERVICE_ROLE_KEY) {
-    let body: { job_id?: unknown } = {};
+    let body: { job_id?: unknown; sweep?: unknown } = {};
     try { body = await req.json(); } catch (_) { /* empty */ }
     if (typeof body.job_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.job_id)) return json({ ok: false, step: 'job', error: 'job_id required' }, 400);
     jobId = body.job_id;
+    if (body.sweep === true) {
+      // Sweep (after the Auth deletion): remove whatever is found under the job's user prefixes and record it. Delete-only and
+      // repeatable, so two sweeps at once are harmless. Never reports completion: an empty sweep is only an observation.
+      const { data: target, error: targetErr } = await admin.rpc('yt_deletion_sweep_target', { p_job: jobId });
+      if (targetErr || typeof target !== 'string') return json({ ok: false, step: 'sweep_target', error: 'job is not past the Auth deletion' }, 409);
+      let removed = 0, remainingAfter = 0;
+      try {
+        for (const b of BUCKETS) {
+          for (let round = 0; round < 1000; round++) {
+            const { data, error } = await admin.storage.from(b).list(target, { limit: 100, offset: 0 });
+            if (error) { if (isMissingBucket(error)) break; throw error; }
+            const names = (data ?? []).filter((f: { id?: string | null }) => f.id !== null).map((f: { name: string }) => `${target}/${f.name}`);
+            if (names.length === 0) break;
+            const { error: rmErr } = await admin.storage.from(b).remove(names);
+            if (rmErr) throw rmErr;
+            removed += names.length;
+          }
+          const { data: after, error: afterErr } = await admin.storage.from(b).list(target, { limit: 100, offset: 0 });
+          if (afterErr && !isMissingBucket(afterErr)) throw afterErr;
+          remainingAfter += (after ?? []).filter((f: { id?: string | null }) => f.id !== null).length;
+        }
+      } catch (e) {
+        await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: 0 });
+        return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: 'sweep', removed, error: String((e as Err)?.message ?? e) });
+      }
+      await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: remainingAfter });
+      return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: remainingAfter > 0 ? 'needs_operator' : 'awaiting_assurance',
+        step: 'sweep', removed, remaining: remainingAfter });
+    }
   } else {
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     const user = userData?.user ?? null;

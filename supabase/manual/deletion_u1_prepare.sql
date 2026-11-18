@@ -77,8 +77,9 @@ drop trigger if exists refusals_guard on yt_private.deletion_refusals;
 create trigger refusals_guard before update or delete on yt_private.deletion_refusals
   for each row execute function yt_private.refusals_guard();
 
--- L (this detailed job record) may be removed only after its steps finished AND R already holds all of its evidence, so removing L
--- never removes evidence that an unresolved refusal still needs. Whether and when to remove L is a separate (unapproved) decision.
+-- L (this detailed job record) is never removed by this draft. AWAITING_ASSURANCE is not a terminal state, and L is what the operator
+-- entry (job_id), the sweep below, the drain boundary, the generation/lease and the step history depend on. A removal rule needs a
+-- genuinely terminal condition that does not exist yet.
 create or replace function yt_private.jobs_guard() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'UPDATE' then
@@ -86,12 +87,7 @@ begin
     new.updated_at := now();
     return new;
   end if;
-  if old.state = 'AWAITING_ASSURANCE' and exists (
-       select 1 from yt_private.deletion_refusals r where r.user_id = old.user_id
-          and r.drained_at is not null and r.auth_deleted_at is not null and r.final_empty_at is not null) then
-    return old;
-  end if;
-  raise exception 'account deletion job: cannot be removed before its evidence is kept in the refusal record';
+  raise exception 'account deletion job: rows cannot be removed (no terminal state is defined)';
 end
 $$;
 drop trigger if exists jobs_guard on yt_private.account_deletion_jobs;
@@ -203,10 +199,47 @@ begin
   return true;
 end
 $$;
+-- Sweep (reconciliation after the Auth deletion). An upload that was already authorized and still streaming outside any database
+-- transaction (e.g. a signed upload started before the sign-URL guard and key revocation) is not covered by the drain boundary, and
+-- neither key rotation nor revocation is documented to stop it. Instead of a time limit, the operator keeps sweeping the user's
+-- prefixes for every refused user whose job is past the Auth deletion; each sweep removes what it finds and is recorded. A single empty
+-- sweep is an observation, not a completion: there is still no terminal state and the refusal stays.
+alter table yt_private.account_deletion_jobs add column if not exists last_swept_at timestamptz;
+alter table yt_private.account_deletion_jobs add column if not exists sweeps integer not null default 0;
+alter table yt_private.account_deletion_jobs add column if not exists late_objects_removed integer not null default 0;
+-- Which user a sweep may touch: only jobs whose Auth user is already deleted (AWAITING_ASSURANCE, or NEEDS_OPERATOR after the Auth
+-- deletion). Returns null for anything else, so the sweep cannot be pointed at an account that is still in use.
+create or replace function public.yt_deletion_sweep_target(p_job uuid) returns uuid
+  language sql stable security definer set search_path = '' as $$
+  select j.user_id from yt_private.account_deletion_jobs j
+   where j.id = p_job and j.auth_deleted_at is not null and j.state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR')
+$$;
+create or replace function public.yt_deletion_sweep_record(p_job uuid, p_removed integer, p_remaining integer) returns boolean
+  language plpgsql security definer set search_path = '' as $$
+begin
+  if p_removed < 0 or p_remaining < 0 then raise exception 'counts must be non-negative'; end if;
+  update yt_private.account_deletion_jobs
+     set last_swept_at = now(), sweeps = sweeps + 1, late_objects_removed = late_objects_removed + p_removed,
+         log = log || jsonb_build_array(jsonb_build_object('at', now(), 'sweep', true, 'removed', p_removed, 'remaining', p_remaining))
+   where id = p_job and auth_deleted_at is not null and state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR');
+  return found;
+end
+$$;
+-- The operator's daily list of jobs to sweep (oldest sweep first). Nothing here ends the sweeping.
+create or replace function public.yt_deletion_sweep_list() returns table(job_id uuid, state text, auth_deleted_at timestamptz,
+  last_swept_at timestamptz, sweeps integer, late_objects_removed integer)
+  language sql stable security definer set search_path = '' as $$
+  select j.id, j.state, j.auth_deleted_at, j.last_swept_at, j.sweeps, j.late_objects_removed
+    from yt_private.account_deletion_jobs j
+   where j.auth_deleted_at is not null and j.state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR')
+   order by j.last_swept_at nulls first, j.auth_deleted_at
+$$;
+
 do $svc$
 declare f text;
 begin
-  foreach f in array array['public.yt_deletion_drain_mark(uuid)','public.yt_deletion_drained(uuid)','public.yt_deletion_evidence(uuid,text)'] loop
+  foreach f in array array['public.yt_deletion_drain_mark(uuid)','public.yt_deletion_drained(uuid)','public.yt_deletion_evidence(uuid,text)',
+                           'public.yt_deletion_sweep_target(uuid)','public.yt_deletion_sweep_record(uuid,integer,integer)','public.yt_deletion_sweep_list()'] loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     execute format('grant execute on function %s to service_role', f);
   end loop;
@@ -264,7 +297,10 @@ $guards$;
 -- request.path for every request (postgres/scope.ts 15-24, 78; present since at least e07d10b). The app never creates signed upload
 -- URLs (it uploads directly and only signs DOWNLOAD URLs), so normal saving is unaffected. If the running Storage version did not set
 -- these values, this guard would not trigger (fail open); that must be confirmed on staging with an ordinary account before relying on it.
--- URLs created before this guard existed are not affected by it: invalidating them needs a one-time URL signing key rotation (separate approval).
+-- URLs created before this guard existed are not affected by it. Per the official URL signing keys guide (read 2026-11-18), rotation
+-- alone keeps BOTH keys valid; the previous key must then be revoked (separate approval; separate from the Auth JWT key). A revoked key
+-- can be moved back to standby, but that revives old URLs and is not a normal safety rollback. Neither rotation nor revocation is
+-- documented to stop an upload that was already authorized and is still streaming: the sweep in the deletion function covers that.
 drop policy if exists "yt no signed upload urls insert" on storage.objects;
 drop policy if exists "yt no signed upload urls update" on storage.objects;
 create policy "yt no signed upload urls insert" on storage.objects as restrictive for insert to anon, authenticated

@@ -143,10 +143,10 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
   await t.test('R (refusal) is created with the job; the job (L) cannot be removed while R lacks its evidence, even after review time',async()=>{
     assert.equal((await su(`select count(*)::int n from yt_private.deletion_refusals where user_id='${A}'`)).rows[0].n,1);
     await su(`update yt_private.account_deletion_jobs set hold_until=now()-interval '30 days', auth_deleted_at=now()-interval '31 days' where id='${job}'`);
-    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/evidence is kept/);
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/no terminal state/);
     for(const kind of ['drained','auth_deleted']){
       await as('service',`select public.yt_deletion_evidence('${job}','${kind}')`);
-      await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/evidence is kept/,'still missing evidence');
+      await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/no terminal state/,'still not removable');
     }
     await assert.rejects(()=>su(`update yt_private.account_deletion_jobs set user_id='${B}' where id='${job}'`),/immutable/);
   });
@@ -158,17 +158,42 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     await assert.rejects(()=>su(`update yt_private.deletion_refusals set refused_since=now() where user_id='${A}'`),/immutable/);
     await assert.rejects(()=>as('service',`select public.yt_deletion_evidence('${job}','something')`),/unknown evidence kind/);
     await as('service',`select public.yt_deletion_evidence('${job}','final_empty')`);
-    // With all evidence copied to R, L may be removed (whether to do so is a separate decision); R and the refusal remain.
-    await su(`delete from yt_private.account_deletion_jobs where id='${job}'`);
+    // AWAITING_ASSURANCE with all three pieces of evidence is still not terminal: L (job_id, drain boundary, history) stays.
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${job}'`),/no terminal state/);
     await assert.rejects(()=>su(`delete from yt_private.deletion_refusals where user_id='${A}'`),/cannot be removed/);
-    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused after L is gone');
+    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused');
   });
-  await t.test('L cannot be removed in a non-final state even if R has all evidence',async()=>{
+  await t.test('sweep: only for jobs past the Auth deletion; records each sweep; users cannot use it; it never ends the refusal',async()=>{
     const jb=(await as('service',`select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
-    for(const k of ['drained','auth_deleted','final_empty'])await as('service',`select public.yt_deletion_evidence('${jb}','${k}')`);
-    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${jb}'`),/evidence is kept/);
+    assert.equal((await as('service',`select public.yt_deletion_sweep_target('${jb}') v`)).rows[0].v,null,'account still in use: no sweep');
+    assert.equal((await as('service',`select public.yt_deletion_sweep_record('${jb}',1,0) v`)).rows[0].v,false);
+    assert.equal((await as('service',`select public.yt_deletion_sweep_target('${job}') v`)).rows[0].v,A);
+    assert.equal((await as('service',`select public.yt_deletion_sweep_record('${job}',2,0) v`)).rows[0].v,true);
+    assert.equal((await as('service',`select public.yt_deletion_sweep_record('${job}',0,0) v`)).rows[0].v,true);
+    const j=(await su(`select sweeps, late_objects_removed, last_swept_at is not null s, state from yt_private.account_deletion_jobs where id='${job}'`)).rows[0];
+    assert.deepEqual(j,{sweeps:2,late_objects_removed:2,s:true,state:'AWAITING_ASSURANCE'},'an empty sweep does not change the state');
+    const list=(await as('service','select * from public.yt_deletion_sweep_list()')).rows;
+    assert.deepEqual(list.map(r=>r.job_id),[job]);
+    await assert.rejects(()=>as('service',`select public.yt_deletion_sweep_record('${job}',-1,0)`),/non-negative/);
+    for(const fn of [`public.yt_deletion_sweep_target('${job}')`,`public.yt_deletion_sweep_record('${job}',0,0)`,`public.yt_deletion_sweep_list()`])
+      await assert.rejects(()=>as(A,`select ${fn}`),refused,fn);
+    await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused');
   });
-  await t.test('drain functions: the boundary is recorded once; with no other transaction running, it is drained',async()=>{
+  await t.test('the refusal comes from R alone: a user with an R row but no job is refused; others are not',async()=>{
+    const D='dddddddd-dddd-dddd-dddd-dddddddddddd';
+    await su(`insert into auth.users(id) values ('${D}')`);
+    await as(D,`insert into storage.objects(bucket_id,name) values ('avatars','${D}/avatar.jpg')`);
+    await su(`insert into yt_private.deletion_refusals(user_id) values ('${D}')`);
+    assert.equal((await su(`select count(*)::int n from yt_private.account_deletion_jobs where user_id='${D}'`)).rows[0].n,0);
+    await assert.rejects(()=>as(D,`insert into public.posts(user_id,body) values ('${D}','x')`),refused);
+    assert.equal((await as(D,'select yt_private.write_allowed() ok')).rows[0].ok,false);
+  });
+  await t.test('L cannot be removed in a non-final state either',async()=>{
+    const jb=(await su(`select id from yt_private.account_deletion_jobs where user_id='${B}'`)).rows[0].id;
+    for(const k of ['drained','auth_deleted','final_empty'])await as('service',`select public.yt_deletion_evidence('${jb}','${k}')`);
+    await assert.rejects(()=>su(`delete from yt_private.account_deletion_jobs where id='${jb}'`),/no terminal state/);
+  });
+  await t.test('drain functions: the boundary is recorded once; with no other transaction running, it is drained (single connection only)',async()=>{
     const jb=(await su(`select id from yt_private.account_deletion_jobs where user_id='${B}'`)).rows[0].id;
     const m1=(await as('service',`select public.yt_deletion_drain_mark('${jb}') v`)).rows[0].v;
     const m2=(await as('service',`select public.yt_deletion_drain_mark('${jb}') v`)).rows[0].v;
@@ -207,7 +232,8 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     await suExec(ROLLBACK);
     assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt deletion:%'`)).rows[0].n,0);
     assert.equal((await su(`select count(*)::int n from pg_policies where policyname like 'yt no signed upload urls%'`)).rows[0].n,2,'sign-URL guard kept');
-    assert.equal((await su('select count(*)::int n from yt_private.deletion_refusals')).rows[0].n,2,'refusals kept');
+    assert.equal((await su('select count(*)::int n from yt_private.deletion_refusals')).rows[0].n,3,'refusals kept (A, B, and D from the R-only test)');
+    assert.equal((await su('select count(*)::int n from yt_private.account_deletion_jobs')).rows[0].n,2,'jobs kept');
     await as(B,`insert into public.posts(user_id,body) values ('${B}','after rollback')`);
     await su(`select set_config('yt.remove_sign_url_guard','acknowledged',false)`);
     await suExec(ROLLBACK);
