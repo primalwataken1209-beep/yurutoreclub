@@ -169,6 +169,28 @@ test('a worker that loses its lease mid-run is fenced out before Auth deletion',
   assert.deepEqual([r.body.ok,r.body.status],[false,'in_progress']);
   assert.equal(s.calls.some(c=>c[0]==='auth'),false,'old worker did not delete Auth');
 });
+test('a stale worker whose Auth deletion is already in flight when it loses the lease: it stops; the next worker finishes (Auth gone = 404) and sets the hold',async()=>{
+  // The old worker passed its last lease check and is inside deleteUser when its lease is lost (paused longer than the lease).
+  // Its external request still completes. The DB cannot stop that request; the design relies on: Storage was empty before
+  // (Auth refuses an owner), the old worker cannot advance the job any more, and a later worker treats "user not found" as deleted.
+  let once=true;
+  const s=setup({hooks:{beforeDeleteUser:(store,j)=>{if(!once)return;once=false;j.generation++;j.lease_owner='lost';j.lease_expires_at=0;}}});
+  const r1=await s.run();
+  assert.deepEqual([r1.body.accepted,r1.body.status],[true,'in_progress'],'old worker is fenced after its in-flight call');
+  assert.equal(s.job().state,'AUTH_DELETING');assert.equal(s.job().authDeleted,undefined,'no hold from the fenced worker');
+  const r2=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id}});
+  assert.deepEqual([r2.body.accepted,r2.body.status],[true,'awaiting_assurance']);
+  assert.equal(s.job().authDeleted,true,'the finishing worker sets the hold');
+  assert.equal(s.calls.filter(c=>c[0]==='auth').length,2,'second deleteUser saw the user already gone');
+});
+test('a worker that loses its lease during the last Storage check before Auth deletion does not call deleteUser',async()=>{
+  let s,stolen=false;
+  s=setup({hooks:{onEmptyList:()=>{const j=s.job();if(j.state==='AUTH_DELETING'&&!stolen){stolen=true;j.generation++;j.lease_owner='new-worker';}}}});
+  const r=await s.run();
+  assert.equal(stolen,true);
+  assert.deepEqual([r.body.accepted,r.body.status],[true,'in_progress']);
+  assert.equal(s.calls.some(c=>c[0]==='auth'),false,'the lease is re-checked right before deleteUser');
+});
 test('operator continuation: service key + job_id only; no user token check, no user id input; after Auth deletion it can still finish',async()=>{
   const s=setup({fail:{deleteUser:{message:'temporary'}}});
   await s.run();
