@@ -88,6 +88,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data: target, error: targetErr } = await admin.rpc('yt_deletion_sweep_target', { p_job: jobId });
       if (targetErr || typeof target !== 'string') return json({ ok: false, step: 'sweep_target', error: 'job is not past the Auth deletion' }, 409);
       let removed = 0, remainingAfter = 0;
+      // The storage outcome and the evidence write are reported apart. A failed listing/removal leaves the remaining count unknown
+      // (null, never 0) and is recorded as a failed sweep; a recording that errors or returns false is itself needs_operator.
+      const record = async (rem: number | null, err: string | null) => {
+        const { data: ok, error: recErr } = await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: rem, p_error: err });
+        return !recErr && ok === true;
+      };
       try {
         for (const b of BUCKETS) {
           for (let round = 0; round < 1000; round++) {
@@ -104,12 +110,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
           remainingAfter += (after ?? []).filter((f: { id?: string | null }) => f.id !== null).length;
         }
       } catch (e) {
-        await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: 0 });
-        return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: 'sweep', removed, error: String((e as Err)?.message ?? e) });
+        const msg = String((e as Err)?.message ?? e) || 'sweep failed';
+        const recorded = await record(null, msg);
+        return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: recorded ? 'sweep' : 'sweep_record',
+          storage: 'failed', recorded, removed, remaining: null, error: msg });
       }
-      await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: remainingAfter });
+      const recorded = await record(remainingAfter, null);
+      if (!recorded) return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: 'sweep_record',
+        storage: 'ok', recorded, removed, remaining: remainingAfter, error: 'sweep result not recorded' });
       return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: remainingAfter > 0 ? 'needs_operator' : 'awaiting_assurance',
-        step: 'sweep', removed, remaining: remainingAfter });
+        step: 'sweep', storage: 'ok', recorded, removed, remaining: remainingAfter });
     }
   } else {
     const { data: userData, error: userErr } = await admin.auth.getUser(token);

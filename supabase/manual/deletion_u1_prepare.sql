@@ -207,6 +207,10 @@ $$;
 alter table yt_private.account_deletion_jobs add column if not exists last_swept_at timestamptz;
 alter table yt_private.account_deletion_jobs add column if not exists sweeps integer not null default 0;
 alter table yt_private.account_deletion_jobs add column if not exists late_objects_removed integer not null default 0;
+-- A failed sweep (listing or removal error) is recorded apart from a successful one: last_swept_at/sweeps only move on a sweep whose
+-- final count is known; a failure moves last_sweep_failed_at/sweep_failures and logs remaining = null (unknown, never zero).
+alter table yt_private.account_deletion_jobs add column if not exists last_sweep_failed_at timestamptz;
+alter table yt_private.account_deletion_jobs add column if not exists sweep_failures integer not null default 0;
 -- Which user a sweep may touch: only jobs whose Auth user is already deleted (AWAITING_ASSURANCE, or NEEDS_OPERATOR after the Auth
 -- deletion). Returns null for anything else, so the sweep cannot be pointed at an account that is still in use.
 create or replace function public.yt_deletion_sweep_target(p_job uuid) returns uuid
@@ -214,22 +218,36 @@ create or replace function public.yt_deletion_sweep_target(p_job uuid) returns u
   select j.user_id from yt_private.account_deletion_jobs j
    where j.id = p_job and j.auth_deleted_at is not null and j.state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR')
 $$;
-create or replace function public.yt_deletion_sweep_record(p_job uuid, p_removed integer, p_remaining integer) returns boolean
+drop function if exists public.yt_deletion_sweep_record(uuid, integer, integer);
+-- p_error null: a completed sweep; p_remaining is the final count and must be known. p_error set: a failed sweep; p_remaining must be
+-- null (unknown). Objects already removed before the failure are still counted in late_objects_removed.
+create or replace function public.yt_deletion_sweep_record(p_job uuid, p_removed integer, p_remaining integer, p_error text default null)
+  returns boolean
   language plpgsql security definer set search_path = '' as $$
 begin
-  if p_removed < 0 or p_remaining < 0 then raise exception 'counts must be non-negative'; end if;
-  update yt_private.account_deletion_jobs
-     set last_swept_at = now(), sweeps = sweeps + 1, late_objects_removed = late_objects_removed + p_removed,
-         log = log || jsonb_build_array(jsonb_build_object('at', now(), 'sweep', true, 'removed', p_removed, 'remaining', p_remaining))
-   where id = p_job and auth_deleted_at is not null and state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR');
+  if p_removed is null or p_removed < 0 or p_remaining < 0 then raise exception 'counts must be non-negative'; end if;
+  if p_error is null and p_remaining is null then raise exception 'a completed sweep needs a known remaining count'; end if;
+  if p_error is not null and p_remaining is not null then raise exception 'a failed sweep has an unknown remaining count (null)'; end if;
+  if p_error is null then
+    update yt_private.account_deletion_jobs
+       set last_swept_at = now(), sweeps = sweeps + 1, late_objects_removed = late_objects_removed + p_removed,
+           log = log || jsonb_build_array(jsonb_build_object('at', now(), 'sweep', true, 'ok', true, 'removed', p_removed, 'remaining', p_remaining))
+     where id = p_job and auth_deleted_at is not null and state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR');
+  else
+    update yt_private.account_deletion_jobs
+       set last_sweep_failed_at = now(), sweep_failures = sweep_failures + 1, late_objects_removed = late_objects_removed + p_removed,
+           log = log || jsonb_build_array(jsonb_build_object('at', now(), 'sweep', true, 'ok', false, 'removed', p_removed,
+                                                             'remaining', null, 'error', left(p_error, 500)))
+     where id = p_job and auth_deleted_at is not null and state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR');
+  end if;
   return found;
 end
 $$;
 -- The operator's daily list of jobs to sweep (oldest sweep first). Nothing here ends the sweeping.
 create or replace function public.yt_deletion_sweep_list() returns table(job_id uuid, state text, auth_deleted_at timestamptz,
-  last_swept_at timestamptz, sweeps integer, late_objects_removed integer)
+  last_swept_at timestamptz, sweeps integer, late_objects_removed integer, last_sweep_failed_at timestamptz, sweep_failures integer)
   language sql stable security definer set search_path = '' as $$
-  select j.id, j.state, j.auth_deleted_at, j.last_swept_at, j.sweeps, j.late_objects_removed
+  select j.id, j.state, j.auth_deleted_at, j.last_swept_at, j.sweeps, j.late_objects_removed, j.last_sweep_failed_at, j.sweep_failures
     from yt_private.account_deletion_jobs j
    where j.auth_deleted_at is not null and j.state in ('AWAITING_ASSURANCE','NEEDS_OPERATOR')
    order by j.last_swept_at nulls first, j.auth_deleted_at
@@ -239,7 +257,7 @@ do $svc$
 declare f text;
 begin
   foreach f in array array['public.yt_deletion_drain_mark(uuid)','public.yt_deletion_drained(uuid)','public.yt_deletion_evidence(uuid,text)',
-                           'public.yt_deletion_sweep_target(uuid)','public.yt_deletion_sweep_record(uuid,integer,integer)','public.yt_deletion_sweep_list()'] loop
+                           'public.yt_deletion_sweep_target(uuid)','public.yt_deletion_sweep_record(uuid,integer,integer,text)','public.yt_deletion_sweep_list()'] loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     execute format('grant execute on function %s to service_role', f);
   end loop;

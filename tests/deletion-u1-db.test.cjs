@@ -175,6 +175,21 @@ test('U1 draft: a deletion job stops only that user\'s own creates/changes; dele
     const list=(await as('service','select * from public.yt_deletion_sweep_list()')).rows;
     assert.deepEqual(list.map(r=>r.job_id),[job]);
     await assert.rejects(()=>as('service',`select public.yt_deletion_sweep_record('${job}',-1,0)`),/non-negative/);
+    // A failed sweep: remaining unknown (null), recorded apart; the successful sweep's time and count do not move.
+    // Pin the successful sweep time to a known past value (text, microseconds) so that a change by the failed sweep is visible.
+    await su(`alter table yt_private.account_deletion_jobs disable trigger user`);
+    await su(`update yt_private.account_deletion_jobs set last_swept_at='2000-01-01 00:00:00+00' where id='${job}'`);
+    await su(`alter table yt_private.account_deletion_jobs enable trigger user`);
+    const before=(await su(`select last_swept_at::text t from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].t;
+    assert.equal((await as('service',`select public.yt_deletion_sweep_record('${job}',1,null,'list failed') v`)).rows[0].v,true);
+    const f=(await su(`select sweeps, sweep_failures, late_objects_removed, last_swept_at::text t, last_sweep_failed_at is not null fa, log->-1 e from yt_private.account_deletion_jobs where id='${job}'`)).rows[0];
+    assert.deepEqual([f.sweeps,f.sweep_failures,f.late_objects_removed,f.fa],[2,1,3,true]);
+    assert.equal(String(f.t),String(before),'a failed sweep does not advance the successful sweep time');
+    assert.deepEqual([f.e.ok,f.e.remaining,f.e.error],[false,null,'list failed']);
+    await assert.rejects(()=>as('service',`select public.yt_deletion_sweep_record('${job}',0,null)`),/known remaining/);
+    await assert.rejects(()=>as('service',`select public.yt_deletion_sweep_record('${job}',0,0,'x')`),/unknown remaining/);
+    const l2=(await as('service','select * from public.yt_deletion_sweep_list()')).rows[0];
+    assert.deepEqual([l2.sweeps,l2.sweep_failures],[2,1]);
     for(const fn of [`public.yt_deletion_sweep_target('${job}')`,`public.yt_deletion_sweep_record('${job}',0,0)`,`public.yt_deletion_sweep_list()`])
       await assert.rejects(()=>as(A,`select ${fn}`),refused,fn);
     await assert.rejects(()=>as(A,`insert into storage.objects(bucket_id,name) values ('avatars','${A}/avatar.jpg')`),refused,'still refused');

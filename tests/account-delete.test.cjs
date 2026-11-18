@@ -33,7 +33,13 @@ function setup(opts={}){
       j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
       return {data:{generation:j.generation,state:j.state,user_id:j.user_id},error:null};}
     if(name==='yt_deletion_sweep_target'){return {data:j&&j.authDeleted&&['AWAITING_ASSURANCE','NEEDS_OPERATOR'].includes(j.state)?j.user_id:null,error:null};}
-    if(name==='yt_deletion_sweep_record'){if(!(j&&j.authDeleted))return {data:false,error:null};j.sweeps=(j.sweeps||[]);j.sweeps.push([a.p_removed,a.p_remaining]);return {data:true,error:null};}
+    if(name==='yt_deletion_sweep_record'){   // same input rules as the SQL: completed => known count; failed => count null
+      if(fail.sweepRecord==='error')return {data:null,error:{message:'record failed'}};
+      if(fail.sweepRecord==='false')return {data:false,error:null};
+      const err=a.p_error??null,rem=a.p_remaining??null;
+      if((err===null)===(rem===null))return {data:null,error:{message:'bad sweep record input'}};
+      if(!(j&&j.authDeleted))return {data:false,error:null};
+      j.sweeps=(j.sweeps||[]);j.sweeps.push(err===null?[a.p_removed,rem]:[a.p_removed,null,err]);return {data:true,error:null};}
     if(name==='yt_deletion_drain_mark'){if(fail.drainMark)return {data:null,error:{message:'x'}};if(!j)return {data:null,error:{message:'job not found'}};if(j.drain==null)j.drain=1;return {data:j.drain,error:null};}
     if(name==='yt_deletion_drained'){if(fail.drainCheck)return {data:null,error:{message:'x'}};return {data:!!j&&j.drain!=null&&!opts.notDrained,error:null};}
     if(name==='yt_deletion_evidence'){if(fail.evidence===a.p_kind)return {data:null,error:{message:'x'}};j.evidence=j.evidence||{};if(!j.evidence[a.p_kind])j.evidence[a.p_kind]=calls.length;return {data:true,error:null};}
@@ -256,6 +262,34 @@ test('sweep: an object that lands right after the sweep\'s empty listing makes i
   assert.deepEqual([r.body.status,r.body.remaining],['needs_operator',1]);
   assert.deepEqual(s.job().sweeps.at(-1),[0,1]);
 });
+test('sweep: a failed listing is recorded as a failed sweep with remaining unknown (null, never 0)',async()=>{
+  const opts={fail:{}};const s=setup(opts);await s.run();
+  opts.fail.list={avatars:{message:'unavailable'}};
+  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
+  assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep','failed',true,null]);
+  assert.deepEqual(s.job().sweeps,[[0,null,'unavailable']]);
+});
+test('sweep: a failed removal after some removals keeps the removed count and records remaining unknown',async()=>{
+  const opts={fail:{}};const s=setup(opts);await s.run();
+  s.store.avatars.add(`${uid}/late.jpg`);opts.fail.remove={'post-images':{message:'busy'}};s.store['post-images'].add(`${uid}/p.jpg`);
+  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
+  assert.deepEqual([r.body.status,r.body.removed,r.body.remaining],['needs_operator',1,null]);
+  assert.deepEqual(s.job().sweeps,[[1,null,'busy']]);
+});
+for(const mode of ['error','false']){
+  test(`sweep: a recording that returns ${mode} is needs_operator on the success path`,async()=>{
+    const opts={fail:{}};const s=setup(opts);await s.run();
+    opts.fail.sweepRecord=mode;
+    const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
+    assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep_record','ok',false,0]);
+  });
+  test(`sweep: a recording that returns ${mode} is reported on the failure path too`,async()=>{
+    const opts={fail:{}};const s=setup(opts);await s.run();
+    opts.fail.sweepRecord=mode;opts.fail.list={avatars:{message:'unavailable'}};
+    const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
+    assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep_record','failed',false,null]);
+  });
+}
 test('sweep is refused for a job whose account is not deleted yet, and is not available with a user token',async()=>{
   const s=setup({fail:{deleteUser:{message:'temporary'}}});await s.run();
   const id=s.job().id;
