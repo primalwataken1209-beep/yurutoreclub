@@ -1,0 +1,36 @@
+# NOT RUN. Isolated concurrency check for the U1 drain (tests-pg/drain-concurrency.cjs) against a throwaway PostgreSQL service container.
+# Runs only on a push to the branch below (nothing else triggers it). No secrets, no Supabase, no deploy. Pushing that branch needs approval.
+name: u1-drain-concurrency
+on:
+  push:
+    branches: ['claude/u1-drain-verify']
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_PASSWORD: throwaway
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts pg@8.13.1
+      - run: node tests-pg/drain-concurrency.cjs
+        env:
+          PG_URL: postgres://postgres:throwaway@localhost:5432/postgres
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drain-concurrency-result
+          path: drain-concurrency-result.json
+          if-no-files-found: warn
