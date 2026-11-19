@@ -13,7 +13,7 @@ const crypto = require('node:crypto');
 const root = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-const RLS = '42501';
+const V = require('./verdicts.cjs');   // pure verdict rules (unit-tested without a database)
 
 function refuse(msg) { console.error('refused: ' + msg); process.exit(2); }
 const URL0 = process.env.PG_URL;
@@ -111,8 +111,9 @@ async function lateWriter(url, name, observeOnly) {
     const writer = await pending; await w.query(writer.ok ? 'commit' : 'rollback');
     const drainedAfter = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
     const rowExists = (await s.query(`select count(*)::int n from storage.objects where name='${A}/avatar.jpg'`)).rows[0].n === 1;
-    if (observeOnly) report(name, 'observation', { gapSeen: drainedWhileOpen === true && writer.ok, writer, drainedWhileOpen, drainedAfter, rowExists });
-    else report(name, drainedWhileOpen === false && drainedAfter === true ? 'pass' : 'fail', { writer, drainedWhileOpen, drainedAfter, rowExists });
+    const o = { writer, drainedWhileOpen, drainedAfter, rowExists };
+    const verdict = V.lateWriter(o, observeOnly);
+    report(name, verdict, observeOnly ? { gapSeen: verdict === 'observation' && drainedWhileOpen === true, ...o } : o);
   } finally { await ctl.end(); await w.end(); await s.end(); }
 }
 // EXPERIMENTAL trigger: a service-user (signed-style) write whose statement began before R committed is refused with SQLSTATE 42501.
@@ -123,7 +124,7 @@ async function signedStyle(url) {
     await w.query('begin');
     const control = await outcome(w.query(`insert into storage.objects(bucket_id,name,owner_id) values ('avatars','${A}/signed.jpg','${A}')`));
     await w.query('rollback');
-    if (!control.ok) throw new Error('control write failed: ' + control.code);
+    if (!control.ok) { report('trigger refuses a service-user write that completes after R', V.signedStyle({ control }), { control }); return; }
     await ctl.query('select pg_advisory_lock(7002)');
     await w.query('begin'); const wpid = await pidOf(w);
     const pending = outcome(w.query(`insert into storage.objects(bucket_id,name,owner_id) select 'avatars','${A}/signed.jpg','${A}' from (select pg_advisory_xact_lock(7002)) l`));
@@ -131,8 +132,7 @@ async function signedStyle(url) {
     await svc(s, `select public.yt_deletion_accept('${A}',3600)`);
     await ctl.query('select pg_advisory_unlock(7002)');
     const writer = await pending; await w.query('rollback');
-    const ok = !writer.ok && writer.code === RLS && /writes refused for a user being deleted/.test(writer.message);
-    report('trigger refuses a service-user write that completes after R', ok ? 'pass' : 'fail', { control: control.ok, writer });
+    report('trigger refuses a service-user write that completes after R', V.signedStyle({ control, writer }), { control, writer });
   } finally { await ctl.end(); await w.end(); await s.end(); }
 }
 // An unrelated idle-in-transaction connection holds the drain until it ends (a cost, expected).
@@ -155,15 +155,14 @@ async function afterCapture(url) {
     await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${B}',true)`); await w.query('set local role authenticated');
     const control = await outcome(w.query(`insert into storage.objects(bucket_id,name) values ('avatars','${B}/avatar.jpg')`));
     await w.query('rollback');
-    if (!control.ok) throw new Error('control write failed: ' + control.code + ' ' + control.message);
+    if (!control.ok) { report('a transaction started after the capture does not hold the drain and is refused by RLS', V.afterCapture({ control }), { control }); return; }
     const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
     await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
     await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${B}',true)`); await w.query('set local role authenticated');
     const drained = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
     const writer = await outcome(w.query(`insert into storage.objects(bucket_id,name) values ('avatars','${B}/avatar.jpg')`));
     await w.query('rollback');
-    const ok = drained === true && !writer.ok && writer.code === RLS && /row-level security/.test(writer.message);
-    report('a transaction started after the capture does not hold the drain and is refused by RLS', ok ? 'pass' : 'fail', { control: control.ok, drained, writer });
+    report('a transaction started after the capture does not hold the drain and is refused by RLS', V.afterCapture({ control, drained, writer }), { control, drained, writer });
   } finally { await s.end(); await w.end(); }
 }
 // The capture is not hidden by an activity snapshot taken earlier in the same transaction (pg_stat_clear_snapshot).
@@ -192,17 +191,21 @@ async function concurrentMarks(url) {
     await m2.query('begin'); await m2.query('set local role service_role');
     const p1 = await pidOf(m1), p2 = await pidOf(m2);
     await m1.query(`select public.yt_deletion_drain_mark('${job}')`);
-    const t1 = (await m1.query(`select public.yt_deletion_drained('${job}') v`)).rows.length;   // keeps m1 open with its update done
+    // m1's capture time as exact text (no precision lost), read inside m1 before it commits.
+    await m1.query('reset role');
+    const capturedAtBefore = (await m1.query(`select drain_captured_at::text t from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].t;
+    const m1CapturedM2 = (await m1.query(`select count(*)::int n from yt_private.deletion_drain_waits where job_id='${job}' and pid=$1`, [p2])).rows[0].n === 1;
     const pending = outcome(m2.query(`select public.yt_deletion_drain_mark('${job}')`));
     await waitBlocked(ctl, p2, `locktype in ('transactionid','tuple')`, 'second mark waiting for the first');
+    const drainedWhileBlocked = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
     await m1.query('commit');
-    const r2 = await pending; await m2.query(r2.ok ? 'commit' : 'rollback');
-    const rows = (await s.query(`select drain_captured_at, (select array_agg(pid order by pid) from yt_private.deletion_drain_waits w where w.job_id=j.id) pids from yt_private.account_deletion_jobs j where id='${job}'`)).rows[0];
-    const capturedOnce = rows.drain_captured_at !== null;
-    const m1Captured = (rows.pids || []).includes(p2);   // m1 saw m2's open transaction
-    const drained = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-    report('two concurrent marks: second waits, no error, capture time set once, drain holds until both end', r2.ok && capturedOnce && m1Captured && drained === true && t1 === 1 ? 'pass' : 'fail',
-      { second: r2, capturedOnce, m1Captured, drained, p1, p2 });
+    const second = await pending;
+    const drainedWhileM2Open = second.ok ? (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v : null;
+    await m2.query(second.ok ? 'commit' : 'rollback');
+    const capturedAtAfter = (await s.query(`select drain_captured_at::text t from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].t;
+    const drainedAfterBoth = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    const o = { second, capturedAtBefore, capturedAtAfter, m1CapturedM2, drainedWhileBlocked, drainedWhileM2Open, drainedAfterBoth, p1, p2 };
+    report('two concurrent marks: second waits, no error, capture time unchanged, drain false until both end', V.concurrentMarks(o), o);
   } finally { await s.end(); await m1.end(); await m2.end(); await ctl.end(); }
 }
 // A session that turns track_activities off for itself (state 'disabled') makes mark fail closed even though the caller's setting is on.
@@ -215,7 +218,8 @@ async function perSessionDisabled(url) {
     const r = await outcome(svc(s, `select public.yt_deletion_drain_mark('${job}')`));
     await x.query('commit');
     const nothing = (await s.query(`select drain_captured_at is null n from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].n;
-    report('per-session track_activities off fails closed', callerOn && !r.ok && /not fully visible/.test(r.message) && nothing ? 'pass' : 'fail', { callerOn, mark: r, nothingCaptured: nothing });
+    const o = { callerOn, mark: r, nothingCaptured: nothing };
+    report('per-session track_activities off fails closed', V.perSessionDisabled(o), o);
   } finally { await x.end(); await s.end(); }
 }
 
