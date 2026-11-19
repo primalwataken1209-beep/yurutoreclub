@@ -37,7 +37,8 @@ create or replace view yt_private.backend_activity as
 revoke all on yt_private.backend_activity from public, anon, authenticated;
 
 -- Fail closed when the activity data could be incomplete. pg_stat_activity hides other sessions' columns (NULL) from a role without
--- pg_read_all_stats, and with track_activities off the state/timing columns are not kept; a hidden row would otherwise look like
+-- pg_read_all_stats, and with track_activities off (server-wide, or set off by one session: that backend shows state 'disabled')
+-- the state/timing columns are not kept; a hidden row would otherwise look like
 -- "no transaction" and the drain would pass. Runs as the caller (no SECURITY DEFINER), i.e. as the owner of the definer function that
 -- calls it. pg_stat_clear_snapshot() is called before each read so that a statistics snapshot taken earlier in the same transaction
 -- is not reused (PostgreSQL 17 docs, monitoring-stats: activity data is a per-transaction snapshot until cleared).
@@ -53,7 +54,7 @@ begin
   end if;
   if exists (select 1 from yt_private.backend_activity a
               where a.backend_type = 'client backend' and a.pid <> pg_backend_pid()
-                and (a.state is null or a.backend_start is null)) then
+                and (a.state is null or a.state = 'disabled' or a.backend_start is null)) then
     raise exception 'drain capture: a client backend is not fully visible (fail closed)';
   end if;
 end

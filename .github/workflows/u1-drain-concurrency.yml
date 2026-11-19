@@ -1,5 +1,6 @@
 # NOT RUN. Isolated concurrency check for the U1 drain (tests-pg/drain-concurrency.cjs) against a throwaway PostgreSQL service container.
 # Runs only on a push to the branch below (nothing else triggers it). No secrets, no Supabase, no deploy. Pushing that branch needs approval.
+# Cost: uses GitHub Actions minutes of the repository owner's plan (free allowance and remaining minutes not checked).
 name: u1-drain-concurrency
 on:
   push:
@@ -10,11 +11,14 @@ jobs:
   concurrency:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      YT_DISPOSABLE_MARKER: yt_throwaway_${{ github.run_id }}
     services:
       postgres:
         image: postgres:16.4
         env:
           POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: yt_throwaway_${{ github.run_id }}
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 30
@@ -23,11 +27,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci --ignore-scripts
-      - run: npm install --no-save --ignore-scripts pg@8.13.1
+      # pg and its dependencies come only from tests-pg/package-lock.json (versions and integrity fixed); the app's packages are not used.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests-pg
       - run: node tests-pg/drain-concurrency.cjs
         env:
           PG_URL: postgres://postgres:throwaway@localhost:5432/postgres
+          YT_DISPOSABLE_PG: '1'
       - if: always()
         uses: actions/upload-artifact@v4
         with:

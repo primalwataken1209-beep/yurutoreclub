@@ -125,6 +125,9 @@ test('drain capture fails closed: a hidden client row, track_activities off, or 
   await su(`insert into yt_private.fake_activity values (4242, ${T0}, null, 'client backend', null)`);
   await assert.rejects(()=>as('service',`select public.yt_deletion_drain_mark('${job}')`),/not fully visible/);
   assert.equal((await su(`select drain_captured_at from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].drain_captured_at,null,'nothing captured');
+  // A session that turned track_activities off for itself shows state 'disabled' (the caller's own setting is on).
+  await su(`update yt_private.fake_activity set state='disabled', xact_start=null`);
+  await assert.rejects(()=>as('service',`select public.yt_deletion_drain_mark('${job}')`),/not fully visible/,'per-session disabled');
   await su(`update yt_private.fake_activity set state='idle'`);
   await as('service',`select public.yt_deletion_drain_mark('${job}')`);
   await su(`update yt_private.fake_activity set state=null, backend_start=null`);

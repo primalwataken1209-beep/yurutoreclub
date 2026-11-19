@@ -1,12 +1,30 @@
-// NOT RUN. Real-PostgreSQL concurrency check for the U1 drain (two or more connections). Needs a throwaway PostgreSQL 15+ superuser URL
-// in PG_URL (e.g. the service container of .github/workflows/u1-drain-concurrency.yml) and the `pg` package (installed only there).
-// It creates three scratch databases (yt_old, yt_new, yt_trig), never touches Supabase, and prints one JSON line per case.
-// Exit code 1 if any expectation fails. The "old rule gap" case is an observation: it reports whether the gap was seen.
+// NOT RUN. Real-PostgreSQL concurrency check for the U1 drain (several connections). Never touches Supabase.
+// Safety (refuses to run otherwise, exit 2):
+//   - YT_DISPOSABLE_PG=1 and YT_DISPOSABLE_MARKER=<name> are set (the workflow sets both; the marker is the container's POSTGRES_DB);
+//   - PG_URL points to localhost / 127.0.0.1 / ::1;
+//   - the server holds no non-template database other than "postgres" and the marker (i.e. a freshly started throwaway server);
+//   - each case creates its own database with a unique random name and refuses if it exists. Nothing is ever dropped.
+// Ordering never relies on sleeping: every writer is parked on an advisory lock held by a control connection, and the control connection
+// confirms in pg_locks that the writer is waiting there before the next step. If that is not seen in time, the case is INCONCLUSIVE
+// (exit 3 if nothing failed), never a pass. Results: one JSON line per case and drain-concurrency-result.json.
 const fs = require('node:fs');
-const { Client } = require('pg');
-const URL0 = process.env.PG_URL; if (!URL0) { console.error('PG_URL required'); process.exit(2); }
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = path.join(__dirname, '..');
+const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-const read = f => fs.readFileSync(f, 'utf8');
+const RLS = '42501';
+
+function refuse(msg) { console.error('refused: ' + msg); process.exit(2); }
+const URL0 = process.env.PG_URL;
+if (!URL0) refuse('PG_URL required');
+if (process.env.YT_DISPOSABLE_PG !== '1') refuse('YT_DISPOSABLE_PG=1 required (throwaway server only)');
+const MARKER = process.env.YT_DISPOSABLE_MARKER || '';
+if (!/^yt_throwaway_[a-z0-9_]{4,40}$/.test(MARKER)) refuse('YT_DISPOSABLE_MARKER must look like yt_throwaway_<id>');
+const u0 = new URL(URL0);
+if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(u0.hostname)) refuse('PG_URL host must be local');
+const { Client } = require('pg');   // loaded only after the checks above
+
 const STUBS = `
   do $$ begin
     if not exists (select 1 from pg_roles where rolname='anon') then create role anon; end if;
@@ -27,102 +45,192 @@ const AFTER = `
   create policy "avatars own" on storage.objects for all to authenticated
     using (bucket_id='avatars' and name = auth.uid()::text || '/avatar.jpg') with check (bucket_id='avatars' and name = auth.uid()::text || '/avatar.jpg');
   insert into auth.users(id) values ('${A}'),('${B}');`;
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const results = []; let failed = false;
-const report = (name, ok, detail) => { results.push({ name, ok, ...detail }); if (ok === false) failed = true; console.log(JSON.stringify({ name, ok, ...detail })); };
 
-async function makeDb(name, extra) {
+const results = []; let failed = false, inconclusive = false;
+function report(name, verdict, detail) {   // verdict: 'pass' | 'fail' | 'inconclusive' | 'observation'
+  if (verdict === 'fail') failed = true;
+  if (verdict === 'inconclusive') inconclusive = true;
+  const line = { name, verdict, ...detail }; results.push(line); console.log(JSON.stringify(line));
+}
+class Inconclusive extends Error {}
+
+async function guardServer() {
+  const c = new Client({ connectionString: URL0 }); await c.connect();
+  const dbs = (await c.query('select datname from pg_database where not datistemplate')).rows.map(r => r.datname);
+  await c.end();
+  const extra = dbs.filter(d => d !== 'postgres' && d !== MARKER);
+  if (!dbs.includes(MARKER)) refuse('marker database not found: not the throwaway server');
+  if (extra.length) refuse('server holds other databases: ' + extra.length + ' (not a fresh throwaway server)');
+}
+async function makeDb(label, extra) {
+  const name = 'yt_case_' + label + '_' + crypto.randomBytes(6).toString('hex');
   const admin = new Client({ connectionString: URL0 }); await admin.connect();
-  await admin.query(`drop database if exists ${name}`); await admin.query(`create database ${name}`); await admin.end();
-  const url = new globalThis.URL(URL0); url.pathname = '/' + name;
-  const c = new Client({ connectionString: url.toString() }); await c.connect();
+  const exists = (await admin.query('select 1 from pg_database where datname=$1', [name])).rowCount;
+  if (exists) { await admin.end(); refuse('database already exists: ' + name); }
+  await admin.query(`create database ${name}`); await admin.end();
+  const u = new URL(URL0); u.pathname = '/' + name;
+  const c = new Client({ connectionString: u.toString() }); await c.connect();
   await c.query(STUBS); await c.query(read('supabase_v28_events.sql'));
-  for (const f of fs.readdirSync('supabase/migrations').filter(n => n.endsWith('.sql')).sort()) await c.query(read('supabase/migrations/' + f));
+  for (const f of fs.readdirSync(path.join(root, 'supabase/migrations')).filter(n => n.endsWith('.sql')).sort()) await c.query(read('supabase/migrations/' + f));
   await c.query(AFTER); await c.query(read('supabase/manual/deletion_u1_prepare.sql'));
   for (const f of extra) await c.query(read(f));
   await c.end();
-  return url.toString();
+  return u.toString();
 }
 const conn = async url => { const c = new Client({ connectionString: url }); await c.connect(); return c; };
-const svc = async (c, sql) => { await c.query('reset role'); await c.query('set role service_role'); const r = await c.query(sql); await c.query('reset role'); return r; };
+const pidOf = async c => (await c.query('select pg_backend_pid() p')).rows[0].p;
+const svc = async (c, sql) => { await c.query('reset role'); await c.query('set role service_role'); try { return await c.query(sql); } finally { await c.query('reset role'); } };
+const outcome = p => p.then(() => ({ ok: true }), e => ({ ok: false, code: e.code, message: e.message }));
+// Barrier: wait (polling the catalog, no fixed sleep for ordering) until `pid` is waiting on a lock matching `where`.
+async function waitBlocked(ctl, pid, where, what) {
+  for (let i = 0; i < 200; i++) {
+    const r = await ctl.query(`select 1 from pg_locks where pid=$1 and not granted and ${where}`, [pid]);
+    if (r.rowCount) return;
+    await new Promise(res => setTimeout(res, 50));
+  }
+  throw new Inconclusive('barrier not reached: ' + what);
+}
+const ADV = key => `locktype='advisory' and classid=0 and objid=${key} and objsubid=1`;
+async function runCase(name, fn) {
+  try { await fn(); } catch (e) { if (e instanceof Inconclusive) report(name, 'inconclusive', { reason: e.message }); else report(name, 'fail', { error: e.message }); }
+}
 
-// Case 1/2: a user-path completion whose statement snapshot precedes R's commit and whose first write (xid) comes after it.
-async function lateWriter(url, label, expectOldGap) {
-  const w = await conn(url), s = await conn(url);
-  await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${A}',true)`); await w.query('set local role authenticated');
-  const pending = w.query(`insert into storage.objects(bucket_id,name) select 'avatars','${A}/avatar.jpg' from pg_sleep(2)`).then(() => 'inserted', e => 'refused: ' + e.message);
-  await sleep(400);
-  const job = (await svc(s, `select public.yt_deletion_accept('${A}',3600) id`)).rows[0].id;   // R committed (autocommit)
-  await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
-  const drainedWhileOpen = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-  const writer = await pending; await w.query('commit');
-  const drainedAfter = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-  const rowExists = (await s.query(`select count(*)::int n from storage.objects where name='${A}/avatar.jpg'`)).rows[0].n === 1;
-  await w.end(); await s.end();
-  if (expectOldGap) report(label, null, { observation: drainedWhileOpen ? 'gap seen: drained while the late writer was open' : 'no gap seen in this run', writer, drainedWhileOpen, drainedAfter, rowExists });
-  else report(label, drainedWhileOpen === false && drainedAfter === true, { writer, drainedWhileOpen, drainedAfter, rowExists });
+// A user-path completion that takes its statement snapshot, then parks (advisory lock) before writing; R commits while it is parked.
+async function lateWriter(url, name, observeOnly) {
+  const ctl = await conn(url), w = await conn(url), s = await conn(url);
+  try {
+    await ctl.query('select pg_advisory_lock(7001)');
+    await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${A}',true)`); await w.query('set local role authenticated');
+    const wpid = await pidOf(w);
+    const pending = outcome(w.query(`insert into storage.objects(bucket_id,name) select 'avatars','${A}/avatar.jpg' from (select pg_advisory_xact_lock(7001)) l`));
+    await waitBlocked(ctl, wpid, ADV(7001), 'writer parked after its snapshot');
+    const job = (await svc(s, `select public.yt_deletion_accept('${A}',3600) id`)).rows[0].id;   // R committed while the writer is parked
+    await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
+    const drainedWhileOpen = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    await ctl.query('select pg_advisory_unlock(7001)');
+    const writer = await pending; await w.query(writer.ok ? 'commit' : 'rollback');
+    const drainedAfter = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    const rowExists = (await s.query(`select count(*)::int n from storage.objects where name='${A}/avatar.jpg'`)).rows[0].n === 1;
+    if (observeOnly) report(name, 'observation', { gapSeen: drainedWhileOpen === true && writer.ok, writer, drainedWhileOpen, drainedAfter, rowExists });
+    else report(name, drainedWhileOpen === false && drainedAfter === true ? 'pass' : 'fail', { writer, drainedWhileOpen, drainedAfter, rowExists });
+  } finally { await ctl.end(); await w.end(); await s.end(); }
 }
-// Case 3: the experimental trigger refuses a service-user (signed-style) write whose statement started before R committed.
+// EXPERIMENTAL trigger: a service-user (signed-style) write whose statement began before R committed is refused with SQLSTATE 42501.
 async function signedStyle(url) {
-  const w = await conn(url), s = await conn(url);
-  await w.query('begin');
-  const pending = w.query(`insert into storage.objects(bucket_id,name,owner_id) select 'avatars','${A}/signed.jpg','${A}' from pg_sleep(2)`).then(() => 'inserted', e => 'refused: ' + e.message);
-  await sleep(400);
-  await svc(s, `select public.yt_deletion_accept('${A}',3600)`);
-  const writer = await pending; await w.query('rollback');
-  await w.end(); await s.end();
-  report('trigger refuses a service-user write that completes after R', /writes refused/.test(writer), { writer });
+  const ctl = await conn(url), w = await conn(url), s = await conn(url);
+  try {
+    // Control: the same write succeeds before any refusal.
+    await w.query('begin');
+    const control = await outcome(w.query(`insert into storage.objects(bucket_id,name,owner_id) values ('avatars','${A}/signed.jpg','${A}')`));
+    await w.query('rollback');
+    if (!control.ok) throw new Error('control write failed: ' + control.code);
+    await ctl.query('select pg_advisory_lock(7002)');
+    await w.query('begin'); const wpid = await pidOf(w);
+    const pending = outcome(w.query(`insert into storage.objects(bucket_id,name,owner_id) select 'avatars','${A}/signed.jpg','${A}' from (select pg_advisory_xact_lock(7002)) l`));
+    await waitBlocked(ctl, wpid, ADV(7002), 'service-user writer parked');
+    await svc(s, `select public.yt_deletion_accept('${A}',3600)`);
+    await ctl.query('select pg_advisory_unlock(7002)');
+    const writer = await pending; await w.query('rollback');
+    const ok = !writer.ok && writer.code === RLS && /writes refused for a user being deleted/.test(writer.message);
+    report('trigger refuses a service-user write that completes after R', ok ? 'pass' : 'fail', { control: control.ok, writer });
+  } finally { await ctl.end(); await w.end(); await s.end(); }
 }
-// Case 4: an unrelated idle-in-transaction connection holds the drain until it ends (cost, not a failure).
+// An unrelated idle-in-transaction connection holds the drain until it ends (a cost, expected).
 async function idleHolder(url) {
   const x = await conn(url), s = await conn(url);
-  await x.query('begin'); await x.query('select 1');
-  const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
-  await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
-  const held = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-  await x.query('commit');
-  const released = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-  await x.end(); await s.end();
-  report('idle transaction open at capture holds the drain until it ends', held === false && released === true, { held, released });
+  try {
+    await x.query('begin'); await x.query('select 1');
+    const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
+    await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
+    const held = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    await x.query('commit');
+    const released = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    report('idle transaction open at capture holds the drain until it ends', held === false && released === true ? 'pass' : 'fail', { held, released });
+  } finally { await x.end(); await s.end(); }
 }
-// Case 5: a transaction that starts after the capture does not hold the drain, and its user-path write sees R.
+// A transaction started after the capture: does not hold the drain; its user-path write is refused by RLS (42501). Control first.
 async function afterCapture(url) {
   const s = await conn(url), w = await conn(url);
-  const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
-  await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
-  await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${B}',true)`); await w.query('set local role authenticated');
-  const drained = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
-  const writer = await w.query(`insert into storage.objects(bucket_id,name) values ('post-images','${B}/late.jpg')`).then(() => 'inserted', e => 'refused: ' + e.message);
-  await w.query('rollback'); await w.end(); await s.end();
-  report('a transaction started after the capture does not hold the drain and is refused', drained === true && writer.startsWith('refused'), { drained, writer });
+  try {
+    await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${B}',true)`); await w.query('set local role authenticated');
+    const control = await outcome(w.query(`insert into storage.objects(bucket_id,name) values ('avatars','${B}/avatar.jpg')`));
+    await w.query('rollback');
+    if (!control.ok) throw new Error('control write failed: ' + control.code + ' ' + control.message);
+    const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
+    await svc(s, `select public.yt_deletion_drain_mark('${job}')`);
+    await w.query('begin'); await w.query(`select set_config('request.jwt.claim.sub','${B}',true)`); await w.query('set local role authenticated');
+    const drained = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    const writer = await outcome(w.query(`insert into storage.objects(bucket_id,name) values ('avatars','${B}/avatar.jpg')`));
+    await w.query('rollback');
+    const ok = drained === true && !writer.ok && writer.code === RLS && /row-level security/.test(writer.message);
+    report('a transaction started after the capture does not hold the drain and is refused by RLS', ok ? 'pass' : 'fail', { control: control.ok, drained, writer });
+  } finally { await s.end(); await w.end(); }
 }
-
-// Case 6: a statistics snapshot read earlier in the same transaction is not reused by the capture (pg_stat_clear_snapshot).
+// The capture is not hidden by an activity snapshot taken earlier in the same transaction (pg_stat_clear_snapshot).
 async function snapshotReuse(url) {
-  const s = await conn(url), x = await conn(url);
-  const job = (await svc(s, `select public.yt_deletion_accept('${A}',3600) id`)).rows[0].id;   // R committed first
-  await s.query('begin'); await s.query('set local role service_role');
-  await s.query('select count(*) from pg_stat_activity');   // takes the per-transaction activity snapshot
-  await x.query('begin'); await x.query('select 1');          // opens after that snapshot
-  await s.query(`select public.yt_deletion_drain_mark('${job}')`);
-  await s.query('commit');
-  const xpid = (await x.query('select pg_backend_pid() p')).rows[0].p;
-  const captured = (await s.query(`select count(*)::int n from yt_private.deletion_drain_waits where job_id='${job}' and pid=${xpid}`)).rows[0].n === 1;
-  await x.query('commit'); await x.end(); await s.end();
-  report('capture is not hidden by an earlier statistics snapshot in the same transaction', captured, { captured });
+  const s = await conn(url), x = await conn(url), ctl = await conn(url);
+  try {
+    const job = (await svc(s, `select public.yt_deletion_accept('${A}',3600) id`)).rows[0].id;
+    await s.query('begin'); await s.query('set local role service_role');
+    await s.query('select count(*) from pg_stat_activity');   // takes the per-transaction activity snapshot
+    await x.query('begin'); await x.query('select 1'); const xpid = await pidOf(x);
+    const seen = await ctl.query(`select 1 from pg_stat_activity where pid=$1 and xact_start is not null`, [xpid]);
+    if (!seen.rowCount) throw new Inconclusive('x transaction not visible to the control connection');
+    await s.query(`select public.yt_deletion_drain_mark('${job}')`);
+    await s.query('commit');
+    const captured = (await s.query(`select count(*)::int n from yt_private.deletion_drain_waits where job_id='${job}' and pid=$1`, [xpid])).rows[0].n === 1;
+    await x.query('commit');
+    report('capture is not hidden by an earlier statistics snapshot in the same transaction', captured ? 'pass' : 'fail', { captured });
+  } finally { await s.end(); await x.end(); await ctl.end(); }
+}
+// Two marks at the same time: the second blocks on the job row; the capture time is set once; both callers' captures are kept.
+async function concurrentMarks(url) {
+  const s = await conn(url), m1 = await conn(url), m2 = await conn(url), ctl = await conn(url);
+  try {
+    const job = (await svc(s, `select public.yt_deletion_accept('${A}',3600) id`)).rows[0].id;
+    await m1.query('begin'); await m1.query('set local role service_role');
+    await m2.query('begin'); await m2.query('set local role service_role');
+    const p1 = await pidOf(m1), p2 = await pidOf(m2);
+    await m1.query(`select public.yt_deletion_drain_mark('${job}')`);
+    const t1 = (await m1.query(`select public.yt_deletion_drained('${job}') v`)).rows.length;   // keeps m1 open with its update done
+    const pending = outcome(m2.query(`select public.yt_deletion_drain_mark('${job}')`));
+    await waitBlocked(ctl, p2, `locktype in ('transactionid','tuple')`, 'second mark waiting for the first');
+    await m1.query('commit');
+    const r2 = await pending; await m2.query(r2.ok ? 'commit' : 'rollback');
+    const rows = (await s.query(`select drain_captured_at, (select array_agg(pid order by pid) from yt_private.deletion_drain_waits w where w.job_id=j.id) pids from yt_private.account_deletion_jobs j where id='${job}'`)).rows[0];
+    const capturedOnce = rows.drain_captured_at !== null;
+    const m1Captured = (rows.pids || []).includes(p2);   // m1 saw m2's open transaction
+    const drained = (await svc(s, `select public.yt_deletion_drained('${job}') v`)).rows[0].v;
+    report('two concurrent marks: second waits, no error, capture time set once, drain holds until both end', r2.ok && capturedOnce && m1Captured && drained === true && t1 === 1 ? 'pass' : 'fail',
+      { second: r2, capturedOnce, m1Captured, drained, p1, p2 });
+  } finally { await s.end(); await m1.end(); await m2.end(); await ctl.end(); }
+}
+// A session that turns track_activities off for itself (state 'disabled') makes mark fail closed even though the caller's setting is on.
+async function perSessionDisabled(url) {
+  const x = await conn(url), s = await conn(url);
+  try {
+    await x.query('set track_activities = off'); await x.query('begin'); await x.query('select 1');
+    const job = (await svc(s, `select public.yt_deletion_accept('${B}',3600) id`)).rows[0].id;
+    const callerOn = (await s.query(`select current_setting('track_activities') v`)).rows[0].v === 'on';
+    const r = await outcome(svc(s, `select public.yt_deletion_drain_mark('${job}')`));
+    await x.query('commit');
+    const nothing = (await s.query(`select drain_captured_at is null n from yt_private.account_deletion_jobs where id='${job}'`)).rows[0].n;
+    report('per-session track_activities off fails closed', callerOn && !r.ok && /not fully visible/.test(r.message) && nothing ? 'pass' : 'fail', { callerOn, mark: r, nothingCaptured: nothing });
+  } finally { await x.end(); await s.end(); }
 }
 
 (async () => {
-  const oldUrl = await makeDb('yt_old', []);
-  const newUrl = await makeDb('yt_new', ['supabase/manual/deletion_u1_drain_capture.sql']);
-  const trigUrl = await makeDb('yt_trig', ['supabase/manual/deletion_u1_drain_capture.sql', 'supabase/manual/EXPERIMENTAL_deletion_u1_storage_trigger.sql']);
-  await lateWriter(oldUrl, 'old transaction-id rule with a late writer (observation)', true);
-  await lateWriter(newUrl, 'capture rule waits for a late writer open at capture', false);
-  await signedStyle(trigUrl);
-  await idleHolder(newUrl);
-  await afterCapture(newUrl);
-  const snapUrl = await makeDb('yt_snap', ['supabase/manual/deletion_u1_drain_capture.sql']);
-  await snapshotReuse(snapUrl);
-  fs.writeFileSync('drain-concurrency-result.json', JSON.stringify(results, null, 1) + '\n');
-  process.exit(failed ? 1 : 0);
+  await guardServer();
+  const oldUrl = await makeDb('old', []);
+  const cap = ['supabase/manual/deletion_u1_drain_capture.sql'];
+  await runCase('old rule late writer', () => lateWriter(oldUrl, 'old transaction-id rule with a parked late writer (observation)', true));
+  await runCase('capture late writer', async () => lateWriter(await makeDb('cap', cap), 'capture rule waits for a parked late writer open at capture', false));
+  await runCase('trigger', async () => signedStyle(await makeDb('trig', [...cap, 'supabase/manual/EXPERIMENTAL_deletion_u1_storage_trigger.sql'])));
+  await runCase('idle', async () => idleHolder(await makeDb('idle', cap)));
+  await runCase('after capture', async () => afterCapture(await makeDb('after', cap)));
+  await runCase('snapshot reuse', async () => snapshotReuse(await makeDb('snap', cap)));
+  await runCase('concurrent marks', async () => concurrentMarks(await makeDb('marks', cap)));
+  await runCase('per-session disabled', async () => perSessionDisabled(await makeDb('disabled', cap)));
+  fs.writeFileSync(path.join(root, 'drain-concurrency-result.json'), JSON.stringify(results, null, 1) + '\n');
+  process.exit(failed ? 1 : inconclusive ? 3 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
