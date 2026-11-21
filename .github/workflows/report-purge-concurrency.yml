@@ -1,0 +1,45 @@
+# NOT RUN. Isolated concurrency check C1-C4 for the report purge (tests-pg/report-purge-concurrency.cjs) against a throwaway
+# PostgreSQL service container. Runs only on a push to the branch below. No secrets, no Supabase, no deploy. Pushing it needs approval.
+# Cost: GitHub-hosted standard runner minutes of the repository (Work 11-19: public repository; standard runners documented as free for
+# public repositories). Not re-checked here.
+name: report-purge-concurrency
+on:
+  push:
+    branches: ['claude/report-purge-verify']
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      YT_DISPOSABLE_MARKER: yt_throwaway_${{ github.run_id }}
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: yt_throwaway_${{ github.run_id }}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # pg and its dependencies come only from tests-pg/package-lock.json (versions and integrity fixed).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests-pg
+      - name: Verify reviewed source bytes
+        run: |
+          echo '1f23f80a1404d3d25ce985cd9e35dc8dcc3b8de89e4677f6be6e771e3ffbe8f4  supabase/manual/report_purge_prepare.sql' | sha256sum -c -
+          echo '8b64370b7e6840c0d9144c8df1b13fe7d4505b2a90e159385c75bcad74d5d57e  tests-pg/report-purge-concurrency.cjs' | sha256sum -c -
+          echo '64d4d20d82bd661a006ab981d3a55d9fea15ea450ebd554af84c9f6230dfb24c  tests-pg/report-purge-verdicts.cjs' | sha256sum -c -
+      - run: node tests-pg/report-purge-concurrency.cjs
+        env:
+          PG_URL: postgres://postgres:throwaway@localhost:5432/postgres
+          YT_DISPOSABLE_PG: '1'
+      - name: Result evidence
+        if: always()
+        run: cat report-purge-concurrency-result.json
