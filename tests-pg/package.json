@@ -1,0 +1,8 @@
+{
+  "name": "yurutore-report-purge-concurrency",
+  "private": true,
+  "description": "Throwaway-PostgreSQL concurrency check for the report purge (C1-C4). Not part of the app; installed only by .github/workflows/report-purge-concurrency.yml.",
+  "dependencies": {
+    "pg": "8.13.1"
+  }
+}
