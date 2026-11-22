@@ -32,14 +32,30 @@ function setup(opts={}){
       if(!j||j.state==='AWAITING_ASSURANCE'||(j.lease_owner&&j.lease_expires_at>now()&&j.lease_owner!==a.p_owner))return {data:null,error:null};
       j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
       return {data:{generation:j.generation,state:j.state,user_id:j.user_id},error:null};}
-    if(name==='yt_deletion_sweep_target'){return {data:j&&j.authDeleted&&['AWAITING_ASSURANCE','NEEDS_OPERATOR'].includes(j.state)?j.user_id:null,error:null};}
-    if(name==='yt_deletion_sweep_record'){   // same input rules as the SQL: completed => known count; failed => count null
-      if(fail.sweepRecord==='error')return {data:null,error:{message:'record failed'}};
-      if(fail.sweepRecord==='false')return {data:false,error:null};
-      const err=a.p_error??null,rem=a.p_remaining??null;
-      if((err===null)===(rem===null))return {data:null,error:{message:'bad sweep record input'}};
-      if(!(j&&j.authDeleted))return {data:false,error:null};
-      j.sweeps=(j.sweeps||[]);j.sweeps.push(err===null?[a.p_removed,rem]:[a.p_removed,null,err]);return {data:true,error:null};}
+    // Sweep v2: same rules as supabase/manual/deletion_u1_sweep_v2.sql (checked there against PGlite).
+    if(name==='yt_deletion_sweep_begin'){
+      if(fail.sweepBegin)return {data:null,error:{message:'begin failed'}};
+      if(!j)return {data:{refused:'not_found'},error:null};
+      if(!j.authDeleted||!['AWAITING_ASSURANCE','NEEDS_OPERATOR'].includes(j.state))return {data:{refused:'not_past_auth'},error:null};
+      if(authUserExists)return {data:{refused:'auth_exists'},error:null};
+      if(opts.noRefusal)return {data:{refused:'no_refusal'},error:null};
+      if(j.lease_owner&&j.lease_expires_at>now())return {data:{refused:'busy'},error:null};
+      j.generation++;j.lease_owner=a.p_owner;j.lease_expires_at=now()+a.p_lease_seconds*1000;
+      return {data:{user_id:j.user_id,generation:j.generation},error:null};}
+    if(name==='yt_deletion_sweep_alive'){
+      if(fail.alive)return {data:null,error:{message:'x'}};
+      if(hooks.onAlive)hooks.onAlive();
+      return {data:!!j&&j.generation===a.p_generation&&j.lease_owner===a.p_owner&&j.lease_expires_at>now()+a.p_min_lease_seconds*1000,error:null};}
+    if(name==='yt_deletion_sweep_finish'){
+      if(fail.sweepFinish==='error')return {data:null,error:{message:'finish failed'}};
+      if(fail.sweepFinish==='false')return {data:false,error:null};
+      const CLASSES=[null,'list_failed','limit_exceeded','unexpected_layout','time_budget','lease_lost','remove_failed','verify_failed','unexpected'];
+      if(!CLASSES.includes(a.p_error_class??null))return {data:null,error:{message:'unknown error class'}};
+      if((a.p_error_class??null)===null&&(a.p_remaining==null||a.p_planned==null))return {data:null,error:{message:'completed sweep needs counts'}};
+      if(!(j&&j.generation===a.p_generation&&j.lease_owner===a.p_owner))return {data:false,error:null};
+      if(typeof a.p_release_lease!=='boolean')return {data:null,error:{message:'p_release_lease is required'}};
+      j.sweeps=(j.sweeps||[]);j.sweeps.push([a.p_planned??null,a.p_removed,a.p_remaining??null,a.p_error_class??null]);
+      if(a.p_release_lease){j.lease_owner=null;j.lease_expires_at=0;}return {data:true,error:null};}
     if(name==='yt_deletion_drain_mark'){if(fail.drainMark)return {data:null,error:{message:'x'}};if(!j)return {data:null,error:{message:'job not found'}};if(j.drain==null)j.drain=1;return {data:j.drain,error:null};}
     if(name==='yt_deletion_drained'){if(fail.drainCheck)return {data:null,error:{message:'x'}};return {data:!!j&&j.drain!=null&&!opts.notDrained,error:null};}
     if(name==='yt_deletion_evidence'){if(fail.evidence===a.p_kind)return {data:null,error:{message:'x'}};j.evidence=j.evidence||{};if(!j.evidence[a.p_kind])j.evidence[a.p_kind]=calls.length;return {data:true,error:null};}
@@ -67,12 +83,20 @@ function setup(opts={}){
       }
     },
     storage:{from(bucket){return {
-      async list(prefix,{limit,offset}){assert.equal(prefix,uid);calls.push(['list',bucket,offset]);
+      // Like Storage: the direct children of a prefix; a deeper path shows as a folder entry (id null), files have an id.
+      async list(prefix,{limit,offset}){assert.ok(prefix===uid||prefix.startsWith(uid+'/'));calls.push(['list',bucket,offset,prefix]);
+        if(hooks.onList)hooks.onList(bucket,prefix);
         if(fail.list&&fail.list[bucket])return {data:null,error:fail.list[bucket]};
-        const names=[...store[bucket]].filter(n=>n.startsWith(uid+'/')).map(n=>n.slice(uid.length+1)).sort();
-        if(names.length===0&&hooks.onEmptyList)hooks.onEmptyList(bucket,store);   // e.g. an object that lands right after an empty listing
-        return {data:names.slice(offset,offset+limit).map(name=>({name,id:'obj'})),error:null};},
+        if(fail.nullList&&fail.nullList===bucket)return {data:null,error:null};
+        if(fail.badName&&fail.badName===bucket)return {data:[{name:'../other/file.png',id:'obj'}],error:null};
+        const entries=new Map();
+        for(const n of store[bucket]){if(!n.startsWith(prefix+'/'))continue;const rest=n.slice(prefix.length+1);const i=rest.indexOf('/');
+          if(i<0)entries.set(rest,{name:rest,id:'obj'});else entries.set(rest.slice(0,i),{name:rest.slice(0,i),id:null});}
+        const list=[...entries.values()].sort((x,y)=>x.name<y.name?-1:x.name>y.name?1:0);
+        if(list.length===0&&hooks.onEmptyList)hooks.onEmptyList(bucket,store);   // e.g. an object that lands right after an empty listing
+        return {data:list.slice(offset,offset+limit),error:null};},
       async remove(paths){calls.push(['remove',bucket,paths.length]);
+        if(hooks.onRemove)await hooks.onRemove(bucket,paths,store,job());
         if(fail.remove&&fail.remove[bucket])return {error:fail.remove[bucket]};
         for(const p of paths)store[bucket].delete(p);return {error:null};}
     };}},
@@ -86,7 +110,7 @@ function setup(opts={}){
     const r=await handler(new Request('http://offline.invalid/delete',{method:'POST',headers:auth?{Authorization:auth}:{},body:JSON.stringify(body)}));
     return {status:r.status,body:await r.json()};
   };
-  return {calls,store,jobs,job,run,setAuthGone:()=>{authUserExists=false;}};
+  return {calls,store,jobs,job,run,setAuthGone:()=>{authUserExists=false;},setAuthExists:()=>{authUserExists=true;}};
 }
 const files=(n,prefix='p')=>Array.from({length:n},(_,i)=>`${uid}/${prefix}${String(i).padStart(4,'0')}.jpg`);
 const kinds=s=>s.calls.filter(c=>['remove','db','auth'].includes(c[0]));
@@ -260,66 +284,186 @@ test('an image found after Auth deletion: no final_empty evidence is recorded',a
   const s=setup({hooks:{afterDeleteUser:st=>st['post-images'].add(`${uid}/late.jpg`)}});await s.run();
   assert.ok(s.job().evidence.auth_deleted);assert.equal(s.job().evidence.final_empty,undefined);
 });
-test('sweep after the Auth deletion: removes a late object, records it, stays awaiting assurance; touches nothing else',async()=>{
-  const s=setup({objects:{avatars:[`${uid}/a.jpg`]}});await s.run();
-  const id=s.job().id;
-  s.store['post-images'].add(`${uid}/late-signed-upload.jpg`);   // e.g. a signed upload that was already streaming
+// ── Sweep v2 (operator, after the Auth deletion) ──
+const SW=(id,extra={})=>({auth:'Bearer '+KEY,body:{job_id:id,sweep:true,max_objects:50,...extra}});
+async function deletedJob(opts={}){const s=setup(opts);await s.run();assert.equal(s.job().state,'AWAITING_ASSURANCE');return s;}
+const noRaw=(s,r,...words)=>{const all=JSON.stringify(r.body)+JSON.stringify(s.job().sweeps||[]);for(const w of words)assert.equal(all.includes(w),false,'raw error text leaked: '+w);};
+test('sweep v2: removes a late object under the planned limit, records counts, releases the lease; touches nothing else',async()=>{
+  const s=await deletedJob({objects:{avatars:[`${uid}/a.jpg`]}});
+  s.store['post-images'].add(`${uid}/late.jpg`);
   const before=s.calls.length;
-  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
-  assert.deepEqual([r.status,r.body.accepted,r.body.status,r.body.step,r.body.removed,r.body.remaining],[200,true,'awaiting_assurance','sweep',1,0]);
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.status,r.body.accepted,r.body.status,r.body.step,r.body.planned,r.body.removed,r.body.remaining,r.body.error_class,r.body.recorded],
+    [200,true,'awaiting_assurance','sweep',1,1,0,null,true]);
   assert.equal(s.store['post-images'].size,0);
   const after=s.calls.slice(before);
-  assert.equal(after.some(c=>['auth','db','getUser','signOut'].includes(c[0])),false,'delete-only on Storage');
-  assert.equal(after.some(c=>c[1]==='yt_deletion_claim'),false,'no lease needed (delete-only, repeatable)');
-  assert.deepEqual(s.job().sweeps,[[1,0]]);
-  const again=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
-  assert.deepEqual([again.body.status,again.body.removed],['awaiting_assurance',0],'an empty sweep is only recorded, not a completion');
-  assert.deepEqual(s.job().sweeps,[[1,0],[0,0]]);
+  assert.equal(after.some(c=>['auth','db','getUser','signOut'].includes(c[0])),false,'Storage only');
+  assert.ok(after.some(c=>c[1]==='yt_deletion_sweep_begin'),'takes the lease');
+  assert.deepEqual(s.job().sweeps,[[1,1,0,null]]);
+  assert.equal(s.job().lease_owner,null,'lease released');assert.equal(s.job().state,'AWAITING_ASSURANCE','state unchanged');
+  const again=await s.run(SW(s.job().id));
+  assert.deepEqual([again.body.status,again.body.planned,again.body.removed,again.body.remaining],['awaiting_assurance',0,0,0],'an empty sweep is only recorded');
 });
-test('sweep: an object that lands right after the sweep\'s empty listing makes it report needs_operator, not awaiting assurance',async()=>{
-  const opts={objects:{avatars:[`${uid}/a.jpg`]},hooks:{}};
-  const s=setup(opts);await s.run();
-  let once=true;opts.hooks.onEmptyList=(b,st)=>{if(once&&b==='post-images'){once=false;st['post-images'].add(`${uid}/racing.jpg`);}};
-  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
-  assert.deepEqual([r.body.status,r.body.remaining],['needs_operator',1]);
-  assert.deepEqual(s.job().sweeps.at(-1),[0,1]);
+test('sweep v2: max_objects is required, an integer from 1 to 200; anything else is refused before the lease is taken',async()=>{
+  const s=await deletedJob();
+  for(const m of [undefined,0,201,1.5,'5',null,-1]){
+    const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true,max_objects:m}});
+    assert.deepEqual([r.status,r.body.step,r.body.error_class],[400,'sweep_input','invalid_input'],String(m));
+  }
+  assert.equal(s.calls.some(c=>c[1]==='yt_deletion_sweep_begin'),false);
 });
-test('sweep: a failed listing is recorded as a failed sweep with remaining unknown (null, never 0)',async()=>{
-  const opts={fail:{}};const s=setup(opts);await s.run();
-  opts.fail.list={avatars:{message:'unavailable'}};
-  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
-  assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep','failed',true,null]);
-  assert.deepEqual(s.job().sweeps,[[0,null,'unavailable']]);
+test('sweep v2: more files than max_objects → nothing is removed, the stop is recorded with remaining unknown',async()=>{
+  const s=await deletedJob();
+  for(const f of files(3,'late'))s.store.avatars.add(f);
+  const r=await s.run(SW(s.job().id,{max_objects:2}));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.planned,r.body.removed,r.body.remaining,r.body.recorded],['needs_operator','limit_exceeded',null,0,null,true]);
+  assert.equal(s.store.avatars.size,3);assert.equal(s.calls.some(c=>c[0]==='remove'),false,'0 deletions');
+  assert.deepEqual(s.job().sweeps,[[null,0,null,'limit_exceeded']]);
+  // The limit counts both buckets together.
+  s.store['post-images'].add(`${uid}/p.jpg`);
+  const r2=await s.run(SW(s.job().id,{max_objects:3}));
+  assert.deepEqual([r2.body.error_class,r2.body.removed],['limit_exceeded',0]);
+  const r3=await s.run(SW(s.job().id,{max_objects:4}));
+  assert.deepEqual([r3.body.status,r3.body.planned,r3.body.removed,r3.body.remaining],['awaiting_assurance',4,4,0]);
 });
-test('sweep: a failed removal after some removals keeps the removed count and records remaining unknown',async()=>{
-  const opts={fail:{}};const s=setup(opts);await s.run();
-  s.store.avatars.add(`${uid}/late.jpg`);opts.fail.remove={'post-images':{message:'busy'}};s.store['post-images'].add(`${uid}/p.jpg`);
-  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
-  assert.deepEqual([r.body.status,r.body.removed,r.body.remaining],['needs_operator',1,null]);
-  assert.deepEqual(s.job().sweeps,[[1,null,'busy']]);
+test('sweep v2: every page is listed and removed in batches of 100 (150 files)',async()=>{
+  const s=await deletedJob();
+  for(const f of files(150,'late'))s.store['post-images'].add(f);
+  const r=await s.run(SW(s.job().id,{max_objects:200}));
+  assert.deepEqual([r.body.status,r.body.planned,r.body.removed,r.body.remaining],['awaiting_assurance',150,150,0]);
+  assert.deepEqual(s.calls.filter(c=>c[0]==='remove').map(c=>c[2]),[100,50]);
+});
+test('sweep v2: nested folders are found at every level; without allow_nested nothing is removed, with it everything is',async()=>{
+  const s=await deletedJob();
+  s.store.avatars.add(`${uid}/top.jpg`);s.store.avatars.add(`${uid}/x/deep.jpg`);s.store.avatars.add(`${uid}/x/y/deeper.jpg`);
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.planned,r.body.removed,r.body.nested_folders],['needs_operator','unexpected_layout',3,0,2]);
+  assert.equal(s.store.avatars.size,3);
+  const r2=await s.run(SW(s.job().id,{allow_nested:true}));
+  assert.deepEqual([r2.body.status,r2.body.planned,r2.body.removed,r2.body.remaining,r2.body.nested_folders],['awaiting_assurance',3,3,0,2]);
+  assert.equal(s.store.avatars.size,0);
+  assert.ok(s.calls.some(c=>c[0]==='list'&&c[3]===`${uid}/x/y`),'walked two levels down');
+});
+test('sweep v2: too deep a folder tree stops with 0 deletions',async()=>{
+  const s=await deletedJob();
+  s.store.avatars.add(`${uid}/a/b/c/d/e/f/too-deep.jpg`);s.store.avatars.add(`${uid}/ok.jpg`);
+  const r=await s.run(SW(s.job().id,{allow_nested:true}));
+  assert.deepEqual([r.body.error_class,r.body.removed],['unexpected_layout',0]);assert.equal(s.store.avatars.size,2);
+});
+test('sweep v2: refused while another worker holds the lease; and while a sweep holds it, the normal continuation does nothing',async()=>{
+  const s=await deletedJob();
+  s.store.avatars.add(`${uid}/late.jpg`);
+  s.job().lease_owner='worker';s.job().lease_expires_at=Date.now()+60000;
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.status,r.body.refused],[409,'busy']);assert.equal(s.store.avatars.size,1);
+  // A job left in NEEDS_OPERATOR after the Auth deletion (the normal continuation could run on it).
+  let during;
+  const u=setup({hooks:{afterDeleteUser:st=>st.avatars.add(`${uid}/after-auth.jpg`),
+    onRemove:async()=>{if(u.job().lease_owner&&u.job().lease_owner.startsWith('sweep-')&&during===undefined)during=await u.run({auth:'Bearer '+KEY,body:{job_id:u.job().id}});}}});
+  await u.run();assert.equal(u.job().state,'NEEDS_OPERATOR');
+  const rs=await u.run(SW(u.job().id));
+  assert.equal(during&&during.body.status,'in_progress','the continuation could not take the lease during the sweep');
+  assert.deepEqual([rs.body.status,rs.body.removed],['awaiting_assurance',1]);
+  assert.equal(u.job().state,'NEEDS_OPERATOR','the sweep does not change the state');
+});
+test('sweep v2: refused when the job is not past the Auth deletion, when the Auth user exists again, or when R is missing',async()=>{
+  const s=setup({fail:{deleteUser:{message:'temporary'}}});await s.run();
+  const r=await s.run(SW(s.job().id));assert.deepEqual([r.status,r.body.refused],[409,'not_past_auth']);
+  const a=await deletedJob();a.store.avatars.add(`${uid}/late.jpg`);a.setAuthExists();
+  const ra=await a.run(SW(a.job().id));assert.deepEqual([ra.status,ra.body.refused],[409,'auth_exists']);assert.equal(a.store.avatars.size,1);
+  const n=await deletedJob({noRefusal:true});
+  const rn=await n.run(SW(n.job().id));assert.deepEqual([rn.status,rn.body.refused],[409,'no_refusal']);
+  const rb=await (async()=>{const x=setup({fail:{sweepBegin:true}});await x.run();x.store.avatars.add(`${uid}/late.jpg`);return [await x.run(SW(x.job().id)),x];})();
+  assert.deepEqual([rb[0].status,rb[0].body.step,rb[0].body.error_class],[503,'sweep_begin','begin_failed']);assert.equal(rb[1].store.avatars.size,1);
+  // A user token with the sweep flag: the normal acceptance path; the flag is ignored.
+  const u=setup({objects:{avatars:[`${uid}/a.jpg`]}});
+  const ru=await u.run({body:{sweep:true,max_objects:5}});
+  assert.equal(ru.body.status,'awaiting_assurance');assert.equal(u.job().sweeps,undefined);
+});
+test('sweep v2: a failed listing → list_failed, nothing removed, remaining unknown; the raw error text is not stored or returned',async()=>{
+  const opts={fail:{}};const s=await deletedJob(opts);
+  s.store.avatars.add(`${uid}/late.jpg`);
+  opts.fail.list={'post-images':{message:'secret-detail-from-storage'}};
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.removed,r.body.remaining,r.body.recorded],['needs_operator','list_failed',0,null,true]);
+  assert.equal(s.store.avatars.size,1,'nothing removed when planning failed');
+  noRaw(s,r,'secret-detail-from-storage');
+});
+test('sweep v2: a failed removal → remove_failed with the removed count of earlier batches; raw text not kept',async()=>{
+  const opts={fail:{}};const s=await deletedJob(opts);
+  for(const f of files(120,'a'))s.store.avatars.add(f);s.store['post-images'].add(`${uid}/p.jpg`);
+  opts.fail.remove={'post-images':{message:'secret-remove-detail'}};
+  const r=await s.run(SW(s.job().id,{max_objects:200}));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.planned,r.body.removed,r.body.remaining],['needs_operator','remove_failed',121,120,null]);
+  noRaw(s,r,'secret-remove-detail');
+});
+test('sweep v2: the time budget stops the sweep before the next outside request',async()=>{
+  let n=0;
+  const s=await deletedJob({env:{YT_FUNCTION_MAX_SECONDS:'60'},hooks:{onList:()=>{const t=Date.now();while(Date.now()-t<3);n++;}}});   // budget 0 s
+  s.store.avatars.add(`${uid}/late.jpg`);
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.error_class,r.body.removed,r.body.recorded],['time_budget',0,true]);
+  assert.equal(s.store.avatars.size,1);
+});
+test('sweep v2: a lease lost in the middle stops further removals; the fenced sweep cannot record (recorded false)',async()=>{
+  const s=await deletedJob({hooks:{onRemove:async(b,p,st,j)=>{if(j.lease_owner&&j.lease_owner.startsWith('sweep-')){j.generation++;j.lease_owner='new-worker';j.lease_expires_at=Date.now()+60000;}}}});
+  for(const f of files(150,'a'))s.store.avatars.add(f);
+  const r=await s.run(SW(s.job().id,{max_objects:200}));
+  assert.deepEqual([r.body.status,r.body.step,r.body.error_class,r.body.removed,r.body.recorded],['needs_operator','sweep_record','lease_lost',100,false]);
+  assert.equal(s.calls.filter(c=>c[0]==='remove').length,1,'no second batch after the lease was lost');
+  assert.equal(s.job().sweeps,undefined,'nothing recorded by the fenced sweep');
 });
 for(const mode of ['error','false']){
-  test(`sweep: a recording that returns ${mode} is needs_operator on the success path`,async()=>{
-    const opts={fail:{}};const s=setup(opts);await s.run();
-    opts.fail.sweepRecord=mode;
-    const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
-    assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep_record','ok',false,0]);
-  });
-  test(`sweep: a recording that returns ${mode} is reported on the failure path too`,async()=>{
-    const opts={fail:{}};const s=setup(opts);await s.run();
-    opts.fail.sweepRecord=mode;opts.fail.list={avatars:{message:'unavailable'}};
-    const r=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true}});
-    assert.deepEqual([r.body.status,r.body.step,r.body.storage,r.body.recorded,r.body.remaining],['needs_operator','sweep_record','failed',false,null]);
+  test(`sweep v2: a recording that returns ${mode} is needs_operator (result unknown to the job log)`,async()=>{
+    const opts={fail:{}};const s=await deletedJob(opts);s.store.avatars.add(`${uid}/late.jpg`);
+    opts.fail.sweepFinish=mode;
+    const r=await s.run(SW(s.job().id));
+    assert.deepEqual([r.body.status,r.body.step,r.body.recorded,r.body.removed],['needs_operator','sweep_record',false,1]);
   });
 }
-test('sweep is refused for a job whose account is not deleted yet, and is not available with a user token',async()=>{
-  const s=setup({fail:{deleteUser:{message:'temporary'}}});await s.run();
-  const id=s.job().id;
-  const r=await s.run({auth:'Bearer '+KEY,body:{job_id:id,sweep:true}});
-  assert.deepEqual([r.status,r.body.step],[409,'sweep_target']);
-  const u=setup({objects:{avatars:[`${uid}/a.jpg`]}});
-  const ru=await u.run({body:{sweep:true}});   // user token: normal acceptance path, the flag is ignored
-  assert.equal(ru.body.status,'awaiting_assurance');assert.equal(u.job().sweeps,undefined);
+test('sweep v2 (Work 11-22): a listing with no error but no data is not an empty folder → list_failed, nothing removed, remaining unknown',async()=>{
+  const opts={fail:{}};const s=await deletedJob(opts);
+  s.store.avatars.add(`${uid}/late.jpg`);opts.fail.nullList='post-images';
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.removed,r.body.remaining],['needs_operator','list_failed',0,null]);
+  assert.equal(s.calls.some(c=>c[0]==='remove'),false);assert.equal(s.store.avatars.size,1);
+});
+test('sweep v2 (Work 11-22): an unsafe listed name (../other/file.png) is never passed to remove → unexpected_layout',async()=>{
+  const opts={fail:{}};const s=await deletedJob(opts);
+  s.store.avatars.add(`${uid}/late.jpg`);opts.fail.badName='avatars';
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.status,r.body.error_class,r.body.removed],['needs_operator','unexpected_layout',0]);
+  assert.equal(s.calls.some(c=>c[0]==='remove'),false);
+});
+test('sweep v2 (Work 11-22): after a removal with an unknown outcome the lease is kept (not released) so nobody else starts on the job',async()=>{
+  const opts={fail:{}};const s=await deletedJob(opts);
+  s.store.avatars.add(`${uid}/late.jpg`);opts.fail.remove={avatars:{message:'timeout'}};
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.error_class,r.body.recorded,r.body.lease_released],['remove_failed',true,false]);
+  assert.ok(s.job().lease_owner&&s.job().lease_owner.startsWith('sweep-'),'lease still held');
+  const again=await s.run(SW(s.job().id));
+  assert.deepEqual([again.status,again.body.refused],[409,'busy'],'a second sweep waits for the lease to expire');
+  // A stop before any removal releases the lease.
+  const t=await deletedJob();for(const f of files(3,'x'))t.store.avatars.add(f);
+  const rt=await t.run(SW(t.job().id,{max_objects:2}));
+  assert.deepEqual([rt.body.error_class,rt.body.lease_released],['limit_exceeded',true]);assert.equal(t.job().lease_owner,null);
+});
+test('sweep v2 (Work 11-22): the time is checked again after the lease check (a slow check does not let a request through)',async()=>{
+  let first=true;
+  const s=await deletedJob({env:{YT_FUNCTION_MAX_SECONDS:'61'},hooks:{onAlive:()=>{if(first){first=false;const t=Date.now();while(Date.now()-t<1100);}}}});   // budget 1 s
+  s.store.avatars.add(`${uid}/late.jpg`);
+  const before=s.calls.filter(c=>c[0]==='list').length;
+  const r=await s.run(SW(s.job().id));
+  assert.equal(r.body.error_class,'time_budget');
+  assert.equal(s.calls.filter(c=>c[0]==='list').length,before,'no listing after the slow check');
+});
+test('sweep v2: a file that lands after planning is not removed in this call (fixed targets) and shows as remaining',async()=>{
+  let once=true;
+  const s=await deletedJob({hooks:{onRemove:async(b,p,st)=>{if(once){once=false;st['post-images'].add(`${uid}/arrived-later.jpg`);}}}});
+  s.store.avatars.add(`${uid}/late.jpg`);
+  const r=await s.run(SW(s.job().id));
+  assert.deepEqual([r.body.status,r.body.planned,r.body.removed,r.body.remaining],['needs_operator',1,1,1]);
+  assert.equal(s.store['post-images'].size,1);
 });
 test('a failed session sign-out is recorded but does not stop the deletion (the job refuses writes either way)',async()=>{
   const s=setup({fail:{signOut:true}});

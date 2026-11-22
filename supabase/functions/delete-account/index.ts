@@ -35,6 +35,13 @@ const BUCKETS = ['avatars', 'post-images'];
 const ALL_STATES = ['WRITES_BLOCKED', 'STORAGE_DELETING', 'STORAGE_VERIFIED', 'DB_DELETING', 'AUTH_DELETING', 'NEEDS_RETRY', 'NEEDS_OPERATOR'];
 // Lease left that a step must still have before it starts an outside action (Storage removal, Auth deletion).
 const MIN_LEASE_LEFT_SECONDS = 30;
+// Sweep v2 limits (supabase/manual/deletion_u1_sweep_v2.sql). The operator gives max_objects (1..SWEEP_MAX_OBJECTS_CAP) per call.
+const SWEEP_MAX_OBJECTS_CAP = 200;   // files in one call (all levels, both buckets)
+const SWEEP_MAX_FOLDERS = 50;        // folders walked in one listing pass
+const SWEEP_MAX_DEPTH = 5;           // folder levels below {uid}/
+const SWEEP_MAX_LIST_CALLS = 200;    // listing requests in one listing pass
+const SWEEP_PAGE = 100;
+const SWEEP_TIME_BUDGET_MAX_MS = 120000;   // never more than 120 s, and always well inside the platform's run limit (see below)
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
@@ -78,48 +85,114 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let jobId: string | null = null;
   let sessions = 'not_requested';
   if (token === SERVICE_ROLE_KEY) {
-    let body: { job_id?: unknown; sweep?: unknown } = {};
+    let body: { job_id?: unknown; sweep?: unknown; max_objects?: unknown; allow_nested?: unknown } = {};
     try { body = await req.json(); } catch (_) { /* empty */ }
     if (typeof body.job_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.job_id)) return json({ ok: false, step: 'job', error: 'job_id required' }, 400);
     jobId = body.job_id;
     if (body.sweep === true) {
-      // Sweep (after the Auth deletion): remove whatever is found under the job's user prefixes and record it. Delete-only and
-      // repeatable, so two sweeps at once are harmless. Never reports completion: an empty sweep is only an observation.
-      const { data: target, error: targetErr } = await admin.rpc('yt_deletion_sweep_target', { p_job: jobId });
-      if (targetErr || typeof target !== 'string') return json({ ok: false, step: 'sweep_target', error: 'job is not past the Auth deletion' }, 409);
-      let removed = 0, remainingAfter = 0;
-      // The storage outcome and the evidence write are reported apart. A failed listing/removal leaves the remaining count unknown
-      // (null, never 0) and is recorded as a failed sweep; a recording that errors or returns false is itself needs_operator.
-      const record = async (rem: number | null, err: string | null) => {
-        const { data: ok, error: recErr } = await admin.rpc('yt_deletion_sweep_record', { p_job: jobId, p_removed: removed, p_remaining: rem, p_error: err });
-        return !recErr && ok === true;
-      };
-      try {
-        for (const b of BUCKETS) {
-          for (let round = 0; round < 1000; round++) {
-            const { data, error } = await admin.storage.from(b).list(target, { limit: 100, offset: 0 });
-            if (error) { if (isMissingBucket(error)) break; throw error; }
-            const names = (data ?? []).filter((f: { id?: string | null }) => f.id !== null).map((f: { name: string }) => `${target}/${f.name}`);
-            if (names.length === 0) break;
-            const { error: rmErr } = await admin.storage.from(b).remove(names);
-            if (rmErr) throw rmErr;
-            removed += names.length;
-          }
-          const { data: after, error: afterErr } = await admin.storage.from(b).list(target, { limit: 100, offset: 0 });
-          if (afterErr && !isMissingBucket(afterErr)) throw afterErr;
-          remainingAfter += (after ?? []).filter((f: { id?: string | null }) => f.id !== null).length;
-        }
-      } catch (e) {
-        const msg = String((e as Err)?.message ?? e) || 'sweep failed';
-        const recorded = await record(null, msg);
-        return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: recorded ? 'sweep' : 'sweep_record',
-          storage: 'failed', recorded, removed, remaining: null, error: msg });
+      // Sweep v2 (after the Auth deletion). Order: input → begin (lock job, Auth gone, R present, take the lease) → plan (list every
+      // level and every page of {uid}/ in both buckets) → stop with 0 deletions if the plan is over max_objects, nested folders were not
+      // allowed, or listing failed → remove only the planned files, in batches, checking time and lease before each request →
+      // list again (all levels) → record counts and a fixed error class → release the lease. Never reports completion.
+      // Limits that remain (not hidden): a removal request already sent cannot be cancelled; if the platform stops this call, the
+      // lease (YT_DELETION_LEASE_SECONDS > YT_FUNCTION_MAX_SECONDS) keeps others out until it expires and nothing is recorded;
+      // `removed` counts files in removal requests that returned no error, not an independent proof that bytes were erased.
+      const maxObjects = body.max_objects;
+      if (typeof maxObjects !== 'number' || !Number.isInteger(maxObjects) || maxObjects < 1 || maxObjects > SWEEP_MAX_OBJECTS_CAP) {
+        return json({ ok: false, step: 'sweep_input', error_class: 'invalid_input' }, 400);
       }
-      const recorded = await record(remainingAfter, null);
-      if (!recorded) return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: 'needs_operator', step: 'sweep_record',
-        storage: 'ok', recorded, removed, remaining: remainingAfter, error: 'sweep result not recorded' });
-      return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: remainingAfter > 0 ? 'needs_operator' : 'awaiting_assurance',
-        step: 'sweep', storage: 'ok', recorded, removed, remaining: remainingAfter });
+      const allowNested = body.allow_nested === true;
+      const startedAt = Date.now();
+      const budgetMs = Math.min(SWEEP_TIME_BUDGET_MAX_MS, Math.max(0, (MAX_RUN - 60) * 1000));
+      const owner = 'sweep-' + crypto.randomUUID();
+      const { data: begun, error: beginErr } = await admin.rpc('yt_deletion_sweep_begin', { p_job: jobId, p_owner: owner, p_lease_seconds: LEASE });
+      if (beginErr || !begun || typeof begun !== 'object') return json({ ok: false, step: 'sweep_begin', error_class: 'begin_failed' }, 503);
+      if (typeof (begun as { refused?: unknown }).refused === 'string') {
+        return json({ ok: false, step: 'sweep_begin', refused: (begun as { refused: string }).refused }, 409);
+      }
+      const target = String((begun as { user_id: string }).user_id);
+      const gen = Number((begun as { generation: number }).generation);
+      class Stop extends Error { constructor(public cls: string) { super(cls); } }
+      const guard = async () => {   // before every outside request
+        if (Date.now() - startedAt > budgetMs) throw new Stop('time_budget');
+        const { data: alive, error } = await admin.rpc('yt_deletion_sweep_alive', { p_job: jobId, p_generation: gen, p_owner: owner, p_min_lease_seconds: MIN_LEASE_LEFT_SECONDS });
+        if (error || alive !== true) throw new Stop('lease_lost');
+        if (Date.now() - startedAt > budgetMs) throw new Stop('time_budget');   // the check itself may have taken time
+      };
+      // A listed name must be a single, plain path segment (no '/', '\', '.', '..', control characters).
+      const safeName = (n: unknown) => typeof n === 'string' && n.length > 0 && n.length <= 255 && n !== '.' && n !== '..'
+        && !/[\/\\\u0000-\u001f\u007f]/.test(n);
+      // True once a removal request was sent whose outcome is not known (an error reply or an exception after sending it).
+      // The lease is then kept until it expires, so that no other sweep or continuation starts while that request may still run.
+      let removalOutcomeUnknown = false;
+      // Every file under {uid}/ in one bucket, all levels and pages. `cap` bounds the files collected; exceeding it stops the pass.
+      const listTree = async (bucket: string, cap: number, failCls: string) => {
+        const files: string[] = []; let folders = 0, calls = 0, nested = 0;
+        const queue: { prefix: string; depth: number }[] = [{ prefix: target, depth: 0 }];
+        while (queue.length) {
+          const { prefix, depth } = queue.shift()!;
+          for (let offset = 0; ; offset += SWEEP_PAGE) {
+            if (++calls > SWEEP_MAX_LIST_CALLS) throw new Stop('unexpected_layout');
+            await guard();
+            const { data, error } = await admin.storage.from(bucket).list(prefix, { limit: SWEEP_PAGE, offset });
+            if (error) { if (isMissingBucket(error)) return { files, nested, missing: true }; throw new Stop(failCls); }
+            if (!Array.isArray(data)) throw new Stop(failCls);   // no error but no list: not an empty folder, an unknown answer
+            const page = data;
+            for (const f of page as { name: unknown; id?: string | null }[]) {
+              if (!f || typeof f !== 'object' || !safeName(f.name)) throw new Stop('unexpected_layout');
+              if (f.id === null || f.id === undefined) {   // a folder
+                if (depth + 1 > SWEEP_MAX_DEPTH || ++folders > SWEEP_MAX_FOLDERS) throw new Stop('unexpected_layout');
+                nested++; queue.push({ prefix: `${prefix}/${f.name}`, depth: depth + 1 });
+              } else {
+                files.push(`${prefix}/${f.name}`);
+                if (files.length > cap) throw new Stop('limit_exceeded');
+              }
+            }
+            if (page.length < SWEEP_PAGE) break;
+          }
+        }
+        return { files, nested, missing: false };
+      };
+      let planned: number | null = null, removed = 0, remaining: number | null = null, cls: string | null = null, nestedFolders = 0;
+      try {
+        const plan: { bucket: string; files: string[] }[] = [];
+        let total = 0;
+        for (const b of BUCKETS) {
+          const t = await listTree(b, maxObjects - total, 'list_failed');
+          total += t.files.length; nestedFolders += t.nested;
+          plan.push({ bucket: b, files: t.files });
+        }
+        planned = total;
+        if (nestedFolders > 0 && !allowNested) throw new Stop('unexpected_layout');   // 0 deletions: the app never writes folders
+        for (const p of plan) {
+          for (let i = 0; i < p.files.length; i += SWEEP_PAGE) {
+            const batch = p.files.slice(i, i + SWEEP_PAGE);
+            if (!batch.every(x => x.startsWith(target + '/'))) throw new Stop('unexpected_layout');   // only the job's own prefix
+            await guard();
+            removalOutcomeUnknown = true;
+            const { error } = await admin.storage.from(p.bucket).remove(batch);
+            if (error) throw new Stop('remove_failed');
+            removalOutcomeUnknown = false;
+            removed += batch.length;
+          }
+        }
+        let left = 0;
+        for (const b of BUCKETS) left += (await listTree(b, SWEEP_MAX_OBJECTS_CAP, 'verify_failed')).files.length;
+        remaining = left;
+      } catch (e) {
+        cls = e instanceof Stop ? e.cls : 'unexpected';   // the raw error is not stored or returned
+        remaining = null;   // any stop: the remaining count is unknown (planned stays null if planning did not finish)
+      }
+      console.error('[delete-account] sweep', { job: jobId, cls, planned, removed });   // counts and class only
+      const releaseLease = !removalOutcomeUnknown;
+      const { data: fin, error: finErr } = await admin.rpc('yt_deletion_sweep_finish', {
+        p_job: jobId, p_generation: gen, p_owner: owner, p_planned: planned, p_removed: removed, p_remaining: remaining, p_error_class: cls,
+        p_release_lease: releaseLease });
+      const recorded = !finErr && fin === true;
+      const attention = !recorded || cls !== null || remaining === null || remaining > 0;
+      return json({ ok: false, accepted: true, contract: CONTRACT, job: jobId, status: attention ? 'needs_operator' : 'awaiting_assurance',
+        step: recorded ? 'sweep' : 'sweep_record', recorded, planned, removed, remaining, error_class: cls, nested_folders: nestedFolders,
+        lease_released: recorded && releaseLease });
     }
   } else {
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
