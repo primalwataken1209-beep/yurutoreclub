@@ -1,0 +1,46 @@
+# NOT RUN. Isolated concurrency check S1-S3 for the sweep v2 lease (tests-pg/sweep-concurrency.cjs) against a throwaway PostgreSQL
+# service container. Runs only on a push to the branch below. No secrets, no Supabase, no Storage, no deploy. Pushing it needs approval.
+# The log carries the result lines only; nothing is uploaded.
+name: sweep-concurrency
+on:
+  push:
+    branches: ['claude/sweep-v2-verify']
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      YT_DISPOSABLE_MARKER: yt_throwaway_${{ github.run_id }}
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: yt_throwaway_${{ github.run_id }}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # pg and its dependencies only from tests-pg/package-lock.json (versions and integrity fixed).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests-pg
+      - name: Verify reviewed source bytes
+        run: |
+          echo '79bda64cd4acfbbeb3b1a8bd9ea567abffa418deef43f86d3fbbcf2c5c1dbb9d  supabase/manual/deletion_u1_sweep_v2.sql' | sha256sum -c -
+          echo '5e54fd22b922ab6ca8b1672d75812de092e4504d534282428e17a8fb6997cebb  supabase/manual/deletion_u1_prepare.sql' | sha256sum -c -
+          echo '8d1b974e1ad08124a1bc61922a8b3d3d066306265de13235b785aadd4c11d8d3  tests-pg/sweep-concurrency.cjs' | sha256sum -c -
+          echo '309afdb8f0f8c47c2d3adf82eb9924e1952bf7b9297f9854fc696cb01089c698  tests-pg/sweep-verdicts.cjs' | sha256sum -c -
+      - run: node tests-pg/sweep-concurrency.cjs
+        env:
+          PG_URL: postgres://postgres:throwaway@localhost:5432/postgres
+          YT_DISPOSABLE_PG: '1'
+
+      - name: Result evidence
+        if: always()
+        run: cat sweep-concurrency-result.json
