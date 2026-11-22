@@ -40,7 +40,7 @@ async function database(t){
   const suExec=async sql=>{await db.exec('reset role');return db.exec(sql);};
   const job=async id=>(await su(`select * from yt_private.account_deletion_jobs where id=$1`,[id])).rows[0];
   // A finished deletion job (as the deletion function leaves it), with a v1-style log and a raw last_error, quiet for `days`.
-  const finished=async({days=31,state='AWAITING_ASSURANCE',evidence=true}={})=>{
+  const finished=async({days=31,state='AWAITING_ASSURANCE',evidence=true,swept=true}={})=>{
     const uid=crypto.randomUUID();
     await su(`insert into auth.users(id) values ($1)`,[uid]);
     const id=(await as('service',`select public.yt_deletion_accept($1,3600) id`,[uid])).rows[0].id;
@@ -48,6 +48,7 @@ async function database(t){
     await su(`update yt_private.account_deletion_jobs set state=$2, auth_deleted_at=now(), last_error='raw storage error text',
       log='[{"to":"STORAGE_DELETING"},{"to":"AWAITING_ASSURANCE","error":"raw text"}]'::jsonb where id=$1`,[id,state]);
     if(evidence)await su(`update yt_private.deletion_refusals set drained_at=now(), auth_deleted_at=now(), final_empty_at=now() where user_id=$1`,[uid]);
+    if(swept)await su(`update yt_private.account_deletion_jobs set last_swept_at=now()-interval '40 days', sweeps=1 where id=$1`,[id]);   // one successful sweep
     await age(id,days);
     return {id,uid};
   };
@@ -88,7 +89,7 @@ test('not eligible: no R evidence, not AWAITING_ASSURANCE, a live lease, a sweep
   cases.lease=(await finished()).id;await su(`update yt_private.account_deletion_jobs set lease_owner='w', lease_expires_at=now()+interval '5 minutes' where id=$1`,[cases.lease]);await age(cases.lease,31);
   cases.cls=(await finished()).id;await su(`update yt_private.account_deletion_jobs set sweep_last_error_class='remove_failed' where id=$1`,[cases.cls]);await age(cases.cls,31);
   cases.later=(await finished()).id;await su(`update yt_private.account_deletion_jobs set last_swept_at=now()-interval '40 days', last_sweep_failed_at=now()-interval '35 days' where id=$1`,[cases.later]);await age(cases.later,31);
-  cases.onlyFail=(await finished()).id;await su(`update yt_private.account_deletion_jobs set last_swept_at=null, last_sweep_failed_at=now()-interval '35 days' where id=$1`,[cases.onlyFail]);await age(cases.onlyFail,31);
+  cases.onlyFail=(await finished({swept:false})).id;await su(`update yt_private.account_deletion_jobs set last_sweep_failed_at=now()-interval '35 days' where id=$1`,[cases.onlyFail]);await age(cases.onlyFail,31);
   cases.hold=(await finished()).id;await as('service',`select public.yt_deletion_detail_hold($1,true,'investigating','owner')`,[cases.hold]);await age(cases.hold,31);
   const expired=(await finished()).id;await su(`update yt_private.account_deletion_jobs set lease_owner='w', lease_expires_at=now()-interval '1 minute' where id=$1`,[expired]);await age(expired,31);
   const items=[...Object.values(cases),expired];
@@ -114,9 +115,12 @@ test('quiet time: 30 days after the last activity; equal to the transaction time
   const re=(await db.query('select * from public.yt_deletion_compact_detail($1,$2,$3)',[JSON.stringify([{job_id:edge,row_version:v}]),'A','owner'])).rows;
   await db.exec('reset role');await db.exec('commit');
   assert.deepEqual([re[0].result,re[0].detail],['not_eligible','not_quiet'],'exactly 30 days is not past');
-  const never=(await finished()).id;
-  assert.equal((await job(never)).last_swept_at,null);
-  assert.equal((await compact([{job_id:never,row_version:await ver(never)}]))[0].result,'compacted');
+  // Work 11-22 (1): no successful sweep at all (last_swept_at and last_sweep_failed_at both NULL, no class) is not enough.
+  const never=(await finished({swept:false})).id;
+  const jn=await job(never);
+  assert.deepEqual([jn.last_swept_at,jn.last_sweep_failed_at,jn.sweep_last_error_class],[null,null,null]);
+  assert.deepEqual((await compact([{job_id:never,row_version:await ver(never)}])).map(x=>[x.result,x.detail]),[['not_eligible','no_successful_sweep']]);
+  assert.equal((await job(never)).log.length,2);
 });
 
 test('stale candidates: a log entry, a sweep record or a hold after listing changes the version → skipped_changed, newest log kept',async t=>{
@@ -139,6 +143,29 @@ test('stale candidates: a log entry, a sweep record or a hold after listing chan
   assert.equal((await compact([{job_id:k,row_version:await ver(k)}]))[0].detail,'not_quiet');
 });
 
+test('Work 11-22 (2): a last_error change alone is activity (version and quiet time move); only the compaction clears it without activity',async t=>{
+  const {su,finished,ver,compact,job}=await database(t);
+  const {id}=await finished();
+  const before=await job(id);const listed=await ver(id);
+  await su(`update yt_private.account_deletion_jobs set last_error='a new raw error' where id=$1`,[id]);
+  const after=await job(id);
+  assert.equal(Number(after.detail_version),Number(before.detail_version)+1);
+  assert.ok(after.last_activity_at>before.last_activity_at,'activity moved');
+  assert.equal((await compact([{job_id:id,row_version:listed}]))[0].result,'skipped_changed');
+  assert.deepEqual((await compact([{job_id:id,row_version:await ver(id)}])).map(x=>x.detail),['not_quiet'],'cannot be cleared before 30 quiet days');
+  assert.equal((await job(id)).last_error,'a new raw error');
+});
+test('Work 11-22 (3): every hold and release keeps who, why and when in a minimal record that users cannot read',async t=>{
+  const {as,su,finished}=await database(t);
+  const {id}=await finished();
+  await as('service',`select public.yt_deletion_detail_hold($1,true,'investigating a report','op-1')`,[id]);
+  await as('service',`select public.yt_deletion_detail_hold($1,false,'investigation closed','op-2')`,[id]);
+  const ev=(await su(`select hold, reason, decided_by, decided_at is not null t from yt_private.detail_hold_events where job_id=$1 order by id`,[id])).rows;
+  assert.deepEqual(ev,[{hold:true,reason:'investigating a report',decided_by:'op-1',t:true},{hold:false,reason:'investigation closed',decided_by:'op-2',t:true}]);
+  await assert.rejects(()=>as('service',`select public.yt_deletion_detail_hold($1,true,$2,'op')`,[id,'x'.repeat(201)]),/too long/);
+  for(const who of [crypto.randomUUID(),null])await assert.rejects(()=>as(who,'select * from yt_private.detail_hold_events'),e=>e.code==='42501');
+  assert.equal((await su(`select count(*)::int n from yt_private.detail_hold_events where job_id=$1`,[id])).rows[0].n,2,'a rejected call adds nothing');
+});
 test('no second compaction of a summary; a new log entry after compaction makes it a candidate again after 30 quiet days',async t=>{
   const {as,finished,ver,compact,job,age}=await database(t);
   const {id}=await finished();

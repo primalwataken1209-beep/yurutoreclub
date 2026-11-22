@@ -6,9 +6,9 @@
 --   passes them back; a row whose version changed in between is skipped (no time-based ordering is assumed: now() is the transaction
 --   start and does not order concurrent writers).
 -- Quiet time: last_activity_at = clock_timestamp() of the last update that was activity (state, generation, lease, sweep counters,
---   hold, or a log entry added without compacting). A compaction itself is not activity. Eligible only 30 days after the last activity.
+--   hold, or a log entry / last_error change made without compacting). A compaction itself is not activity. Eligible only 30 days after the last activity.
 -- Eligible only when, under the row lock in the same transaction: version unchanged; R has auth_deleted_at and final_empty_at;
---   state AWAITING_ASSURANCE; no live lease; no sweep failure since the last successful sweep (and no stored error class); no detail hold;
+--   state AWAITING_ASSURANCE; no live lease; no sweep failure since the last successful sweep (and no stored error class); at least one successful sweep; no detail hold;
 --   quiet 30 days; and something to compact (a log entry that is not a summary, or a last_error).
 -- Compaction: log becomes ONE summary entry {compacted:true, at, entries, last_to}; last_error becomes null; detail_compacted_at is set.
 --   A row that holds only the summary is not compacted again; a new log entry added later makes it a candidate again (after 30 quiet days).
@@ -29,6 +29,18 @@ alter table yt_private.account_deletion_jobs add column if not exists detail_hol
 alter table yt_private.account_deletion_jobs add column if not exists detail_hold_reason text;
 alter table yt_private.account_deletion_jobs add column if not exists detail_compacted_at timestamptz;
 
+-- Minimal record of every hold change (who, why, when). Users cannot read it. Kept with L.
+create table if not exists yt_private.detail_hold_events(
+  id         bigserial primary key,
+  job_id     uuid not null,
+  hold       boolean not null,
+  reason     text not null check (char_length(reason) between 1 and 200),
+  decided_by text not null check (char_length(decided_by) between 1 and 100),
+  decided_at timestamptz not null default clock_timestamp()
+);
+revoke all on yt_private.detail_hold_events from public, anon, authenticated;
+revoke all on sequence yt_private.detail_hold_events_id_seq from public, anon, authenticated;
+
 create table if not exists yt_private.detail_compaction_runs(
   id           bigserial primary key,
   approval_ref text not null check (char_length(approval_ref) between 1 and 200),
@@ -44,10 +56,12 @@ revoke all on sequence yt_private.detail_compaction_runs_id_seq from public, ano
 -- Version and activity on every update (runs after jobs_guard's BEFORE trigger by name order: "yt_jobs_detail" > "jobs_guard").
 create or replace function yt_private.jobs_detail_version() returns trigger language plpgsql set search_path = '' as $$
 declare v_keys text[] := array['updated_at','detail_version','last_activity_at','log','last_error','detail_compacted_at'];
+  -- log and last_error changes are activity unless they come with a compaction (detail_compacted_at set by the compaction).
 begin
   new.detail_version := old.detail_version + 1;
   if (to_jsonb(new) - v_keys) is distinct from (to_jsonb(old) - v_keys)
-     or (new.log is distinct from old.log and new.detail_compacted_at is not distinct from old.detail_compacted_at) then
+     or ((new.log is distinct from old.log or new.last_error is distinct from old.last_error)
+         and new.detail_compacted_at is not distinct from old.detail_compacted_at) then
     new.last_activity_at := clock_timestamp();
   else
     new.last_activity_at := old.last_activity_at;
@@ -66,10 +80,12 @@ create or replace function public.yt_deletion_detail_hold(p_job uuid, p_hold boo
 declare v bigint;
 begin
   if p_hold is null or coalesce(btrim(p_reason), '') = '' or coalesce(btrim(p_by), '') = '' then raise exception 'hold flag, reason and operator are required'; end if;
+  if char_length(p_reason) > 200 or char_length(p_by) > 100 then raise exception 'reason (max 200) and operator (max 100) are too long'; end if;
   update yt_private.account_deletion_jobs
-     set detail_hold = p_hold, detail_hold_reason = case when p_hold then left(p_reason, 200) else null end
+     set detail_hold = p_hold, detail_hold_reason = case when p_hold then p_reason else null end
    where id = p_job returning detail_version into v;
   if not found then raise exception 'job not found'; end if;
+  insert into yt_private.detail_hold_events(job_id, hold, reason, decided_by) values (p_job, p_hold, p_reason, p_by);
   return v;
 end
 $$;
@@ -112,6 +128,7 @@ begin
     elsif r.lease_owner is not null and r.lease_expires_at is not null and r.lease_expires_at > v_now then detail := 'lease';
     elsif r.sweep_last_error_class is not null
        or (r.last_sweep_failed_at is not null and (r.last_swept_at is null or r.last_sweep_failed_at > r.last_swept_at)) then detail := 'sweep_failed';
+    elsif r.last_swept_at is null then detail := 'no_successful_sweep';   -- at least one successful sweep is required
     elsif r.detail_hold then detail := 'hold';
     elsif not (r.last_activity_at + interval '30 days' < v_now) then detail := 'not_quiet';
     else
