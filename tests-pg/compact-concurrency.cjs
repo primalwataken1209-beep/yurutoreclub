@@ -99,6 +99,7 @@ async function eligibleJob(su) {
   return id;
 }
 const row = async (su, id) => (await su.query('select detail_version, log from yt_private.account_deletion_jobs where id=$1', [id])).rows[0];
+const texts = log => (log || []).map(e => JSON.stringify(e));   // each entry as JSON text, for exact comparison
 const COMPACT = `select * from public.yt_deletion_compact_detail($1,'CONC','op-1')`;
 const items = (id, v) => JSON.stringify([{ job_id: id, row_version: Number(v) }]);
 async function control(url) {
@@ -144,7 +145,7 @@ async function k2(url) {
     try { await waitBlocked(ctl, apid, 'compaction waiting for sweep_begin'); blocked = true; } finally { await b.query('commit'); }
     const c = await pending; const r = await row(su, id);
     const o = { control: ctl0, blocked, begin: { ok: begin.ok, value: begin.value }, compact: { ok: c.ok, result: c.ok ? c.rows[0].result : null, message: c.message },
-      logLenBefore: r0.log.length, logLen: r.log.length, summary: !!(r.log[0] && r.log[0].compacted) };
+      logBefore: texts(r0.log), logAfter: texts(r.log), summary: !!(r.log[0] && r.log[0].compacted) };
     report('K2 sweep_begin then compaction: compaction waits, then skips the changed job', V.k2(o), o);
   } finally { await su.end(); await a.end(); await b.end(); await ctl.end(); }
 }
@@ -165,7 +166,7 @@ async function k3(url) {
     try { await waitBlocked(ctl, apid, 'compaction waiting for sweep_finish'); blocked = true; } finally { await b.query('commit'); }
     const c = await pending; const r = await row(su, id);
     const o = { control: ctl0, blocked, finish: { ok: finish.ok, value: finish.value }, compact: { ok: c.ok, result: c.ok ? c.rows[0].result : null, message: c.message },
-      logLenBefore: r0.log.length, logLen: r.log.length, lastIsSweep: !!(r.log.at(-1) && r.log.at(-1).sweep) };
+      logBefore: texts(r0.log), logAfter: texts(r.log), lastIsSweep: !!(r.log.at(-1) && r.log.at(-1).sweep) };
     report('K3 sweep_finish then compaction: compaction waits, then skips; the new log entry is kept', V.k3(o), o);
   } finally { await su.end(); await a.end(); await b.end(); await ctl.end(); }
 }
@@ -177,7 +178,7 @@ async function k4(url) {
     await su.query('set role service_role');
     const g = (await su.query(`select public.yt_deletion_sweep_begin($1,'sweep-B',460) v`, [id])).rows[0].v.generation;   // a running sweep holds the lease
     await su.query('reset role');
-    const v0 = Number((await row(su, id)).detail_version);
+    const r0 = await row(su, id); const v0 = Number(r0.detail_version);
     await a.query('begin'); await a.query('set local role service_role');
     const c = await outcome(a.query(COMPACT, [items(id, v0)]));   // holds the row lock until commit
     await b.query('set role service_role'); const bpid = await pidOf(b);
@@ -186,7 +187,8 @@ async function k4(url) {
     try { await waitBlocked(ctl, bpid, 'sweep_finish waiting for the compaction call'); blocked = true; } finally { await a.query('commit'); }
     const finish = await pending; const r = await row(su, id);
     const o = { control: ctl0, blocked, compact: { ok: c.ok, result: c.ok ? c.rows[0].result : null, detail: c.ok ? c.rows[0].detail : null, message: c.message },
-      finish: { ok: finish.ok, value: finish.value, message: finish.message }, summary: !!(r.log[0] && r.log[0].compacted) };
+      finish: { ok: finish.ok, value: finish.value, message: finish.message }, summary: !!(r.log[0] && r.log[0].compacted),
+      logBefore: texts(r0.log), logAfter: texts(r.log), lastIsSweep: !!(r.log.at(-1) && r.log.at(-1).sweep) };
     report('K4 compaction during a running sweep: compaction refuses (lease); the finish then records', V.k4(o), o);
   } finally { await su.end(); await a.end(); await b.end(); await ctl.end(); }
 }
