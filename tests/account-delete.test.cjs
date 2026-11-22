@@ -11,6 +11,7 @@ const source = fs.readFileSync('supabase/functions/delete-account/index.ts','utf
 const code = ts.transpileModule(source.replace(/^import .*createClient.*;\r?\n/m,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const uid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const KEY='fake-service-key';
+const ANON='fake-anon-key';
 
 // opts: env overrides, objects {bucket:[names]}, fail: {list:{bucket:err}, remove:{bucket:err}, deleteUser:err, getUser:true, signOut:true}
 // hooks: {beforeDeleteUser(), afterDeleteUser(), onDbDelete(table)} to model what happens concurrently.
@@ -71,7 +72,8 @@ function setup(opts={}){
   const client={
     rpc,
     auth:{
-      getUser:async t=>{calls.push(['getUser']);return fail.getUser||!authUserExists?{data:{user:null},error:{message:'invalid'}}:{data:{user:{id:uid}},error:null};},
+      // Like Auth: only a user's access token resolves to a user (a service_role token has no user → error).
+      getUser:async t=>{calls.push(['getUser']);return fail.getUser||!authUserExists||!String(t).startsWith('user-')?{data:{user:null},error:{message:'invalid'}}:{data:{user:{id:uid}},error:null};},
       admin:{
         signOut:async(t,scope)=>{calls.push(['signOut',scope]);return {error:fail.signOut?{message:'x'}:null};},
         deleteUser:async id=>{calls.push(['auth',id]);if(hooks.beforeDeleteUser)hooks.beforeDeleteUser(store,job());
@@ -102,9 +104,18 @@ function setup(opts={}){
     };}},
     from(table){return {delete(){return {eq:async(col,id)=>{calls.push(['db',table,col,id]);if(hooks.onDbDelete)hooks.onDbDelete(table,store,job());return {error:null};}};}};}
   };
-  const env={SUPABASE_URL:'http://offline.invalid',SERVICE_ROLE_KEY:KEY,YT_ACCESS_TOKEN_TTL_SECONDS:'3600',YT_DELETION_LEASE_SECONDS:'460',YT_FUNCTION_MAX_SECONDS:'400',...(opts.env||{})};
+  const env={SUPABASE_URL:'http://offline.invalid',SERVICE_ROLE_KEY:KEY,SUPABASE_ANON_KEY:ANON,YT_ACCESS_TOKEN_TTL_SECONDS:'3600',YT_DELETION_LEASE_SECONDS:'460',YT_FUNCTION_MAX_SECONDS:'400',...(opts.env||{})};
   vm.runInNewContext(code,{Request,Response,console:{log(){},warn(){},error(){}},crypto,
-    createClient:(url,key)=>{assert.equal(url,'http://offline.invalid');assert.equal(key,KEY);return client;},
+    // The anon-key client is only used to ask PostgREST whether the caller's own token is service_role (operator check).
+    // Here a token is "verified service_role" only if it is listed in opts.serviceTokens (the gateway/PostgREST would verify the signature).
+    createClient:(url,key,o)=>{assert.equal(url,'http://offline.invalid');
+      if(key===ANON){const authz=o&&o.global&&o.global.headers&&o.global.headers.Authorization;calls.push(['operatorCheck']);
+        return {rpc:async name=>{assert.equal(name,'yt_deletion_operator_check');
+          if(fail.operatorCheck==='falseData')return {data:false,error:null};
+          if(fail.operatorCheck==='throw')throw new Error('network');
+          if(fail.operatorCheck)return {data:null,error:{message:'network'}};
+          return (opts.serviceTokens||[]).map(t=>'Bearer '+t).includes(authz)?{data:true,error:null}:{data:null,error:{code:'42501',message:'permission denied for function yt_deletion_operator_check'}};}};}
+      assert.equal(key,KEY);return client;},
     Deno:{env:{get:k=>env[k]},serve:fn=>handler=fn}},{timeout:5000});
   const run=async({auth='Bearer user-token',body={user_id:'victim'}}={})=>{
     const r=await handler(new Request('http://offline.invalid/delete',{method:'POST',headers:auth?{Authorization:auth}:{},body:JSON.stringify(body)}));
@@ -464,6 +475,45 @@ test('sweep v2: a file that lands after planning is not removed in this call (fi
   const r=await s.run(SW(s.job().id));
   assert.deepEqual([r.body.status,r.body.planned,r.body.removed,r.body.remaining],['needs_operator',1,1,1]);
   assert.equal(s.store['post-images'].size,1);
+});
+// ── Operator authentication (staging 2026-11-22: v5 returned 401 step auth for a service_role token from the Dashboard test) ──
+const OTHER='dashboard-minted-service-role-jwt';   // a valid service_role token that is not byte-identical to the runtime key
+test('operator auth repro (no secrets): a service_role token that differs from the runtime key string, with no verified check, ends in 401 auth',async()=>{
+  const s=await deletedJob();s.store.avatars.add(`${uid}/late.jpg`);
+  const r=await s.run({auth:'Bearer '+OTHER,body:{job_id:s.job().id,sweep:true,max_objects:1,allow_nested:true}});
+  assert.deepEqual([r.status,r.body.step,r.body.error],[401,'auth','Not authenticated']);
+  assert.equal(s.store.avatars.size,1);assert.equal(s.calls.some(c=>c[1]==='yt_deletion_sweep_begin'),false,'no sweep, no deletion');
+  assert.equal(s.jobs.size,1,'no new job was created for the service token');
+});
+test('operator auth: a token that PostgREST verifies as service_role takes the operator path (the role is not read from the token by the function)',async()=>{
+  const s=await deletedJob({serviceTokens:[OTHER]});
+  for(const f of files(2,'late'))s.store.avatars.add(f);
+  const r=await s.run({auth:'Bearer '+OTHER,body:{job_id:s.job().id,sweep:true,max_objects:1,allow_nested:true}});
+  assert.deepEqual([r.status,r.body.step,r.body.error_class,r.body.removed],[200,'sweep','limit_exceeded',0]);
+  assert.ok(s.calls.some(c=>c[0]==='operatorCheck'),'asked the database');
+  // The exact runtime key still works without the extra check.
+  const before=s.calls.filter(c=>c[0]==='operatorCheck').length;
+  const r2=await s.run({auth:'Bearer '+KEY,body:{job_id:s.job().id,sweep:true,max_objects:2}});
+  assert.equal(r2.body.removed,2);assert.equal(s.calls.filter(c=>c[0]==='operatorCheck').length,before);
+});
+test('operator auth: a user token, an unknown token, a check error, or a missing anon key never becomes the operator (fails closed to the user path)',async()=>{
+  const u=setup({objects:{avatars:[`${uid}/a.jpg`]},serviceTokens:[OTHER]});
+  const ru=await u.run({body:{job_id:'00000000-0000-4000-8000-000000000000',sweep:true,max_objects:1}});   // user token: normal acceptance
+  assert.equal(ru.body.status,'awaiting_assurance');assert.equal(u.job().sweeps,undefined);
+  const s=await deletedJob({serviceTokens:[OTHER],fail:{operatorCheck:true}});
+  const r=await s.run({auth:'Bearer '+OTHER,body:{job_id:s.job().id,sweep:true,max_objects:1}});
+  assert.deepEqual([r.status,r.body.step],[401,'auth'],'check error: not operator');
+  for(const mode of ['falseData','throw']){
+    const m=await deletedJob({serviceTokens:[OTHER],fail:{operatorCheck:mode}});
+    const rm=await m.run({auth:'Bearer '+OTHER,body:{job_id:m.job().id,sweep:true,max_objects:1}});
+    assert.deepEqual([rm.status,rm.body.step],[401,'auth'],mode+': not operator');
+  }
+  const n=await deletedJob({env:{SUPABASE_ANON_KEY:''},serviceTokens:[OTHER]});
+  const rn=await n.run({auth:'Bearer '+OTHER,body:{job_id:n.job().id,sweep:true,max_objects:1}});
+  assert.deepEqual([rn.status,rn.body.step],[401,'auth'],'no anon key: no check, not operator');
+  const x=await deletedJob({serviceTokens:[OTHER]});
+  const rx=await x.run({auth:'Bearer some-other-token',body:{job_id:x.job().id,sweep:true,max_objects:1}});
+  assert.deepEqual([rx.status,rx.body.step],[401,'auth']);
 });
 test('a failed session sign-out is recorded but does not stop the deletion (the job refuses writes either way)',async()=>{
   const s=setup({fail:{signOut:true}});

@@ -84,7 +84,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // ── 受付（利用者）または後処理（運営）でジョブを決める ──
   let jobId: string | null = null;
   let sessions = 'not_requested';
-  if (token === SERVICE_ROLE_KEY) {
+  // Operator (service role) caller. Either the runtime key itself, or a token that PostgREST verifies as service_role: the caller's
+  // token is sent to a function only service_role may execute (supabase/manual/deletion_u1_operator_check.sql). The signature and role are
+  // checked by the platform; this code never trusts a role read from an unverified token. Any error or missing anon key = not operator
+  // (the request then takes the user path, where a service_role token has no user and gets 401). Staging 2026-11-22: a service_role token
+  // from the Dashboard test was not byte-identical to the runtime key and fell to the user path (401 step auth).
+  const isOperator = async (): Promise<boolean> => {
+    if (token === SERVICE_ROLE_KEY) return true;
+    const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    if (!ANON_KEY) return false;
+    try {
+      const caller = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: `Bearer ${token}` } } });
+      const { data, error } = await caller.rpc('yt_deletion_operator_check');
+      return !error && data === true;
+    } catch (_) { return false; }
+  };
+  if (await isOperator()) {
     let body: { job_id?: unknown; sweep?: unknown; max_objects?: unknown; allow_nested?: unknown } = {};
     try { body = await req.json(); } catch (_) { /* empty */ }
     if (typeof body.job_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.job_id)) return json({ ok: false, step: 'job', error: 'job_id required' }, 400);
