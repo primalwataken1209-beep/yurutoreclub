@@ -1,7 +1,7 @@
 {
-  "name": "yurutore-sweep-concurrency",
+  "name": "yurutore-compact-concurrency",
   "private": true,
-  "description": "Throwaway-PostgreSQL concurrency check S1-S3 for the sweep v2 lease. Not part of the app; installed only by .github/workflows/sweep-concurrency.yml.",
+  "description": "Throwaway-PostgreSQL concurrency check K1-K4 for the deletion job detail compaction. Not part of the app; installed only by .github/workflows/compact-concurrency.yml.",
   "dependencies": {
     "pg": "8.13.1"
   }
