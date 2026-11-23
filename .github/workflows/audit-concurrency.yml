@@ -1,0 +1,35 @@
+# NOT RUN. Isolated concurrency check A/B for the hold-record purge against the hold function (tests-pg/audit-concurrency.cjs)
+# on a throwaway PostgreSQL service container. Runs only on a push to the branch below. No secrets, no Supabase, no external database,
+# no Storage, no deploy. Pushing it needs approval. The log carries the result lines only; nothing is uploaded.
+name: audit-concurrency
+on:
+  push:
+    branches: ['claude/audit-concurrency-verify']
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      YT_DISPOSABLE_MARKER: yt_throwaway_${{ github.run_id }}
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: yt_throwaway_${{ github.run_id }}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests-pg
+      - run: node tests-pg/audit-concurrency.cjs
+        env:
+          PG_URL: postgres://postgres:throwaway@localhost:5432/postgres
+          YT_DISPOSABLE_PG: '1'
