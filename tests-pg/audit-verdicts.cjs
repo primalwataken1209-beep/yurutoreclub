@@ -10,6 +10,7 @@ function a(o) {
   if (!pre(o)) return 'inconclusive';
   return o.hold && o.hold.ok === true && o.purge && o.purge.ok === true && o.purge.result === 'skipped_changed' && o.purge.removed === 0
     && o.eventsAfter === o.eventsBefore + 1 && o.lastIsHold === true && o.heldAfter === true && o.versionAfter === o.versionBefore + 1
+    && o.oldCount === o.eventsBefore && o.oldFoundAfter === o.oldCount && typeof o.oldHashBefore === 'string' && o.oldHashBefore === o.oldHashAfter   // the existing records, every column, unchanged
     && untouched(o) ? 'pass' : 'fail';
 }
 // B purge first, then hold: the hold waits, then succeeds: the old records are gone (exactly the cycle), the new hold record remains alone,
@@ -18,6 +19,8 @@ function b(o) {
   if (!pre(o)) return 'inconclusive';
   return o.purge && o.purge.ok === true && o.purge.result === 'deleted' && o.purge.removed === o.eventsBefore && o.hold && o.hold.ok === true
     && o.eventsAfter === 1 && o.lastIsHold === true && o.heldAfter === true && o.versionAfter === o.versionBefore + 1
+    && Array.isArray(o.oldIds) && o.oldIds.length === o.eventsBefore && Array.isArray(o.idsAfter) && o.idsAfter.length === 1
+    && !o.oldIds.includes(o.idsAfter[0])   // every old record id is gone; exactly one new id remains
     && untouched(o) ? 'pass' : 'fail';
 }
 module.exports = { a, b };

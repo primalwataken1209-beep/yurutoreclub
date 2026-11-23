@@ -102,6 +102,10 @@ const state = async (su, id) => {
   const r = (await su.query(`select md5(coalesce(string_agg(to_jsonb(x)::text, '|' order by x.user_id), '')) h from yt_private.deletion_refusals x`)).rows[0].h;
   return { version: Number(j.detail_version), held: j.detail_hold, events: ev.length, lastIsHold: ev.length > 0 && ev[ev.length - 1].hold === true, other, r };
 };
+// The job's existing hold records: their ids, and the md5 of all their columns (in id order).
+const oldRecords = async (su, id) => (await su.query('select array_agg(e.id order by e.id) ids from yt_private.detail_hold_events e where e.job_id=$1', [id])).rows[0].ids.map(Number);
+const hashOf = async (su, ids) => (await su.query(`select md5(coalesce(string_agg(to_jsonb(e)::text, '|' order by e.id), '')) h, count(*)::int n from yt_private.detail_hold_events e where e.id = any($1::bigint[])`, [ids])).rows[0];
+const idsNow = async (su, id) => (await su.query("select coalesce(array_agg(e.id order by e.id), '{}') ids from yt_private.detail_hold_events e where e.job_id=$1", [id])).rows[0].ids.map(Number);
 const PURGE = `select * from public.yt_audit_purge_hold_events($1,'CONC','op-1')`;
 const HOLD = `select public.yt_deletion_detail_hold($1,true,'new investigation','op-2') v`;
 const items = (id, v) => JSON.stringify([{ job_id: id, row_version: v }]);
@@ -123,15 +127,15 @@ async function caseA(url) {
   const su = await conn(url), h = await conn(url), p = await conn(url), ctl = await conn(url);
   try {
     const id = await eligibleJob(su); await eligibleJob(su);   // a second job stays untouched
-    const s0 = await state(su, id);
+    const s0 = await state(su, id); const oldIds = await oldRecords(su, id); const old0 = await hashOf(su, oldIds);
     await h.query('begin'); await h.query('set local role service_role');
     const hold = await outcome(h.query(HOLD, [id]));   // L row updated and a new hold record, not committed
     await p.query('set role service_role'); const ppid = await pidOf(p);
     const pending = outcome(p.query(PURGE, [items(id, s0.version)]));
     let blocked = false;
     try { await waitBlocked(ctl, ppid, 'purge waiting for the hold'); blocked = true; } finally { await h.query('commit'); }
-    const pr = await pending; const s1 = await state(su, id);
-    const o = { control: ctl0, blocked, hold: { ok: hold.ok, message: hold.message },
+    const pr = await pending; const s1 = await state(su, id); const old1 = await hashOf(su, oldIds);
+    const o = { control: ctl0, blocked, hold: { ok: hold.ok, message: hold.message }, oldCount: oldIds.length, oldHashBefore: old0.h, oldHashAfter: old1.h, oldFoundAfter: old1.n,
       purge: { ok: pr.ok, result: pr.ok ? pr.rows[0].result : null, removed: pr.ok ? pr.rows[0].removed : null, message: pr.message },
       eventsBefore: s0.events, eventsAfter: s1.events, lastIsHold: s1.lastIsHold, heldAfter: s1.held, versionBefore: s0.version, versionAfter: s1.version,
       otherBefore: s0.other, otherAfter: s1.other, rBefore: s0.r, rAfter: s1.r };
@@ -143,15 +147,15 @@ async function caseB(url) {
   const su = await conn(url), h = await conn(url), p = await conn(url), ctl = await conn(url);
   try {
     const id = await eligibleJob(su); await eligibleJob(su);
-    const s0 = await state(su, id);
+    const s0 = await state(su, id); const oldIds = await oldRecords(su, id);
     await p.query('begin'); await p.query('set local role service_role');
     const pr = await outcome(p.query(PURGE, [items(id, s0.version)]));   // deletes the cycle, holds the L row lock, not committed
     await h.query('set role service_role'); const hpid = await pidOf(h);
     const pending = outcome(h.query(HOLD, [id]));
     let blocked = false;
     try { await waitBlocked(ctl, hpid, 'hold waiting for the purge'); blocked = true; } finally { await p.query('commit'); }
-    const hold = await pending; const s1 = await state(su, id);
-    const o = { control: ctl0, blocked,
+    const hold = await pending; const s1 = await state(su, id); const after = await idsNow(su, id);
+    const o = { control: ctl0, blocked, oldIds, idsAfter: after,
       purge: { ok: pr.ok, result: pr.ok ? pr.rows[0].result : null, removed: pr.ok ? pr.rows[0].removed : null, message: pr.message },
       hold: { ok: hold.ok, message: hold.message },
       eventsBefore: s0.events, eventsAfter: s1.events, lastIsHold: s1.lastIsHold, heldAfter: s1.held, versionBefore: s0.version, versionAfter: s1.version,
