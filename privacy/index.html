@@ -146,6 +146,10 @@
     Android アプリのバージョン 1.0.6 以前と Web 版では、その端末でご自身の投稿やご自身の SNS プロフィール画面を表示するときに、端末が Google のサーバーから画像を読み込みます（IP アドレスなど通信に必要な情報が Google に送られます）。
     他の利用者の画面では、どのバージョンでも外部の URL の画像は読み込まれず、既定のアイコンが表示されます。
   </p>
+  <p>
+    Android アプリのテスト版では、アカウントの削除を受け付けた時点で送信の途中だった写真が、削除の後に保存される場合があります。その扱いは
+    <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
+  </p>
 
   <h2>9. 端末内に保存される情報</h2>
   <p>
@@ -220,6 +224,10 @@
     法令上の保存義務がある情報、および紛争対応など正当な理由により保存が必要な情報については、必要な期間に限り保存することがあります。
     また、Supabase やホスティング事業者が運用のために記録する通信の記録（IP アドレスなど）は、各事業者の定める期間保存されます。
   </p>
+  <p>
+    Android アプリのテスト版では、退会後も再保存の防止と削除処理の確認に必要な記録を保持します。対象と現在の扱いは、
+    <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
+  </p>
 
   <h2>16. アカウント削除・データ削除</h2>
   <p>
@@ -229,6 +237,10 @@
   </p>
   <p>
     アカウントを削除すると、アカウント、プロフィール、投稿、コメント、リアクション、フォロー関係、アプリ利用情報、運動・進捗情報、プロフィール画像は削除され、元に戻すことはできません。
+  </p>
+  <p>
+    Android アプリのテスト版で、削除の後も保持する記録と、削除の時点で送信の途中だった画像の扱いは、
+    <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
   </p>
 
   <h2>17. 子どもの利用</h2>
@@ -256,7 +268,7 @@
 
   <h2>20. 制定日・改定日</h2>
   <p>制定日：2026年9月8日</p>
-  <p>最終改定日：2026年11月16日</p>
+  <p>最終改定日：2026年11月24日</p>
 </section>
 
 <!-- ═══════════════════ English ═══════════════════ -->
@@ -381,6 +393,10 @@
     In Android app version 1.0.6 and earlier and in the web version, the device loads that image from Google's servers when it shows your own posts or your own community profile screen (sending your IP address and other information needed for the connection to Google).
     In every version, other members' screens do not load images from outside URLs and show the default icon instead.
   </p>
+  <p>
+    In the Android test version, a photo that was still being uploaded when we accepted an account deletion may be stored after the deletion.
+    See section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for how it is handled.
+  </p>
 
   <h2>9. Information stored on your device</h2>
   <p>The Service stores the following in your browser's localStorage and sessionStorage:</p>
@@ -449,6 +465,10 @@
     We may keep certain information for a limited period where the law requires it or where there is another legitimate reason, such as handling a dispute.
     Connection records kept by Supabase and our hosting provider for their operations (such as IP addresses) are retained for the periods those providers set.
   </p>
+  <p>
+    In the Android test version, we retain records needed to prevent further writes and verify deletion processing after account deletion.
+    See section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for the records covered and how they are currently handled.
+  </p>
 
   <h2>16. Deleting your account and your data</h2>
   <p>
@@ -458,6 +478,10 @@
   <p>
     Deleting your account removes your account, profile, posts, comments, reactions, follow relationships, app usage information,
     activity and progress data, and profile photo. This cannot be undone.
+  </p>
+  <p>
+    For the Android test version, see section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for the records kept after deletion
+    and how images that were still being uploaded at the time of deletion are handled.
   </p>
 
   <h2>17. Children</h2>
@@ -483,7 +507,7 @@
 
   <h2>20. Dates</h2>
   <p>Effective date: September 8, 2026</p>
-  <p>Last updated: November 16, 2026</p>
+  <p>Last updated: November 24, 2026</p>
 </section>
 
 <footer class="lg-footer">
