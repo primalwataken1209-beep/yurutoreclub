@@ -15,8 +15,18 @@ const block=(page,lang)=>{const m=new RegExp(`<section data-lang-block="${lang}"
 // NEW+VERSIONED. NEW+LEGACY is rejected.
 const NEW=/\nfunction ytSafeLocalImg\(v\)\{/.test(app);
 const VERSIONED=/Android アプリのバージョン 1\.0\.7 以降|Android app version 1\.0\.7 and later/.test(privacy);
-const REVISED=VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+// Retention text (Android test version, account-deletion 4-2 and the privacy pointers to it): revised 2026-11-24 on both pages.
+// Without it the earlier dates stay as they were. Each page must carry it in both languages or in neither.
+const RET_PRIV={ja:/「4-2\. Android アプリのテスト版で削除の後も保持する記録」/.test(block(privacy,'ja')),en:/section 4-2 of <a href="\.\.\/account-deletion\/">/.test(block(privacy,'en'))};
+const RET_DEL={ja:/<h2>4-2\. Android アプリのテスト版で削除の後も保持する記録<\/h2>/.test(block(deletion,'ja')),en:/<h2>4-2\. Records kept after deletion in the Android test version<\/h2>/.test(block(deletion,'en'))};
+const RETAINED=RET_DEL.ja;
+const REVISED=RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+const DELETION_REVISED=RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
 test('privacy text state fits the code: new code needs the version-specific policy',()=>{assert.ok(VERSIONED||!NEW,'NEW code with LEGACY policy text');});
+test('retention text is on both pages in both languages, or on none (and needs the versioned policy)',()=>{
+  for(const v of [RET_PRIV.ja,RET_PRIV.en,RET_DEL.en])assert.equal(v,RETAINED,'retention text state is the same on both pages and in both languages');
+  assert.ok(VERSIONED||!RETAINED,'retention text needs the version-specific policy');
+});
 
 test('production project only: no staging project, no mobile build hooks in the web source',()=>{
   for(const text of [app,html]){
@@ -119,5 +129,10 @@ test('the code matches: an external Google image is never loaded for other membe
 test('account deletion: post photos are listed and the revision date is shown in both languages',()=>{
   const ja=block(deletion,'ja'),en=block(deletion,'en');
   assert.match(ja,/SNS投稿に添付した写真/);assert.match(en,/photos attached to your community posts/);
-  assert.match(ja,/2026年11月5日 改定/);assert.match(en,/Updated: November 5, 2026/);
+  assert.ok(ja.includes('2026年9月8日 制定／'+DELETION_REVISED.ja+' 改定'),'ja revision date for this text');
+  assert.ok(en.includes('Effective: September 8, 2026 · Updated: '+DELETION_REVISED.en),'en revision date for this text');
+  const jd=/(\d{4})年(\d{1,2})月(\d{1,2})日 改定/.exec(ja),ed=/Updated: ([A-Z][a-z]+) (\d{1,2}), (\d{4})/.exec(en);
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  assert.ok(jd&&ed);assert.deepEqual([+jd[1],+jd[2],+jd[3]],[+ed[3],months.indexOf(ed[1])+1,+ed[2]],'Japanese and English revision dates are the same day');
+  assert.equal((ja.match(/ 改定/g)||[]).length,1);assert.equal((en.match(/Updated: /g)||[]).length,1);
 });
