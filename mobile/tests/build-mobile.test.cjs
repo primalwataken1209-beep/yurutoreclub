@@ -117,6 +117,29 @@ test('native projects use the approved id and callback scheme, with no signing s
   for(const f of ['android/app/src/main/assets/public','ios/App/App/public'])
     assert.match(read(f.startsWith('android')?'android/.gitignore':'ios/.gitignore'),new RegExp('^'+f.replace(/^(android|ios)\//,'').replace(/\//g,'\\/')+'$','m'),f+' must stay untracked');
 });
+test('iOS: only exempt (OS-provided) encryption is declared, and the privacy manifest lists exactly the reviewed data types',()=>{
+  const read=rel=>fs.readFileSync(path.join(mobile,rel),'utf8').replace(/<!--[\s\S]*?-->/g,'');
+  // HTTPS through the OS, Keychain (secure storage) and WebCrypto hashing for sign-in only; no own encryption code.
+  const info=read('ios/App/App/Info.plist');
+  assert.equal((info.match(/<key>ITSAppUsesNonExemptEncryption<\/key>/g)||[]).length,1);
+  assert.match(info,/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+  assert.doesNotMatch(info,/ITSEncryptionExportComplianceCode/);
+  const privacy=read('ios/App/App/PrivacyInfo.xcprivacy');
+  const section=/<key>NSPrivacyCollectedDataTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<\/dict>\s*<\/plist>/.exec(privacy);
+  assert.ok(section,'collected data types section');
+  const entries=[...section[1].matchAll(/<dict>([\s\S]*?)<\/dict>/g)].map(m=>m[1]).map(d=>({
+    type:(/<key>NSPrivacyCollectedDataType<\/key>\s*<string>([A-Za-z]+)<\/string>/.exec(d)||[])[1],
+    linked:(/<key>NSPrivacyCollectedDataTypeLinked<\/key>\s*<(true|false)\/>/.exec(d)||[])[1],
+    tracking:(/<key>NSPrivacyCollectedDataTypeTracking<\/key>\s*<(true|false)\/>/.exec(d)||[])[1],
+    purposes:[...((/<key>NSPrivacyCollectedDataTypePurposes<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(d)||[])[1]||'').matchAll(/<string>([A-Za-z]+)<\/string>/g)].map(m=>m[1])}));
+  const expected={Name:['AppFunctionality'],EmailAddress:['AppFunctionality'],UserID:['AppFunctionality'],PhotosorVideos:['AppFunctionality'],
+    OtherUserContent:['AppFunctionality'],Fitness:['AppFunctionality'],ProductInteraction:['Analytics']};
+  assert.deepEqual(entries.map(e=>e.type).sort(),Object.keys(expected).map(k=>'NSPrivacyCollectedDataType'+k).sort(),'exactly the reviewed types, once each');
+  for(const e of entries){
+    assert.equal(e.linked,'true',e.type+' linked');assert.equal(e.tracking,'false',e.type+' never used for tracking');
+    assert.deepEqual(e.purposes,expected[e.type.replace('NSPrivacyCollectedDataType','')].map(p=>'NSPrivacyCollectedDataTypePurpose'+p),e.type+' purposes');
+  }
+});
 test('compile CI is read-only, SHA-pinned, secret-free and unsigned',()=>{
   const yml=fs.readFileSync(path.join(root,'.github','workflows','mobile-compile.yml'),'utf8').replace(/\r\n/g,'\n').replace(/^\s*#.*$/gm,'');
   assert.match(yml,/^permissions:\n  contents: read\n/m);
