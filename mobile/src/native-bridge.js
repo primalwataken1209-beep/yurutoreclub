@@ -155,6 +155,9 @@
      Supabase first, so builds keep it off unless built with --enable-apple-signin, and only iOS shows it. */
   var platform=cap&&cap.getPlatform?cap.getPlatform():'web';
   var appleEnabled=isNative&&platform==='ios'&&(cfg.oauthProviders||[]).indexOf('apple')>=0;
+  /* The screens show the OAuth block only when at least one provider is enabled (the iOS email-only build has none);
+     oauthSignIn above refuses any provider not in the same list, so the button and the start path always agree. */
+  var oauthEnabled=(cfg.oauthProviders||[]).length>0;
   var TEXT={apple:['Appleでサインイン','Sign in with Apple'],
     appleFailed:['Appleでのサインインを開始できませんでした。時間をおいてもう一度お試しください。',"Couldn't start Sign in with Apple. Please try again later."]};
   function text(key){
@@ -164,5 +167,5 @@
 
   window.YT_NATIVE=Object.freeze({target:cfg.target,redirectUrl:cfg.redirectUrl,clientOptions:clientOptions,
     attach:attach,oauthSignIn:oauthSignIn,handleUrl:handleUrl,classify:classify,back:back,
-    appleEnabled:appleEnabled,text:text});
+    appleEnabled:appleEnabled,oauthEnabled:oauthEnabled,text:text});
 })();

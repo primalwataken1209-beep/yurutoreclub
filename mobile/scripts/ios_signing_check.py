@@ -48,15 +48,27 @@ def validate_profile(p, now=None):
     return team
 
 
-def check_assets(public, key):
+def email_only_requested():
+    value = os.environ.get('YT_IOS_EMAIL_ONLY', 'false')
+    require(value in ('true', 'false'), 'YT_IOS_EMAIL_ONLY must be true or false')
+    return value == 'true'
+
+
+def check_assets(public, key, email_only=False):
     info = json.loads((public / 'build-info.json').read_text())
     require(info.get('target') == 'staging' and info.get('appId') == APP
             and info.get('supabaseUrl') == STAGING, 'Wrong build target')
+    # The requested login mode and the built assets must agree (no OAuth at all in the iOS email-only build).
+    require((info.get('iosEmailOnly') is True) == email_only, 'Login mode differs from the request')
     bundle = (public / 'app.bundle.js').read_text()
     require(key in bundle and 'CI_COMPILE_ONLY' not in bundle, 'Wrong staging key')
     config = (public / 'native-config.js').read_text()
     require('"redirectUrl":"' + APP + '://auth/callback"' in config,
             'Wrong callback')
+    if email_only:
+        require('"oauthProviders":[]' in config and '"iosEmailOnly":true' in config, 'OAuth still enabled')
+    else:
+        require('iosEmailOnly' not in config, 'Unexpected email-only config')
     for f in public.rglob('*'):
         if f.is_file() and f.suffix.lower() in ('.js', '.html', '.json', '.css'):
             text = f.read_text()
@@ -106,7 +118,8 @@ def main(verified_ipa_callback=None):
     child_env = dict(os.environ)
     child_env.pop('YT_STAGING_PUBLISHABLE_KEY', None)
     mobile = Path.cwd()
-    check_assets(mobile / 'ios/App/App/public', key)
+    email_only = email_only_requested()
+    check_assets(mobile / 'ios/App/App/public', key, email_only)
     root = Path(tempfile.mkdtemp(prefix='yt-sign-', dir=os.environ['RUNNER_TEMP']))
     os.chmod(root, 0o700)
     keychain = root / 'signing.keychain-db'
@@ -195,7 +208,7 @@ def main(verified_ipa_callback=None):
         require(any(x.get('NSPrivacyAccessedAPIType') == 'NSPrivacyAccessedAPICategoryFileTimestamp'
                     and 'C617.1' in x.get('NSPrivacyAccessedAPITypeReasons', [])
                     for x in privacy.get('NSPrivacyAccessedAPITypes', [])), 'Missing timestamp privacy reason')
-        check_assets(app / 'public', key)
+        check_assets(app / 'public', key, email_only)
         digest = hashlib.sha256(ipas[0].read_bytes()).hexdigest()
         summary = ('iOS staging signing/export verification passed.\n\n'
                    f'Commit: {os.environ["GITHUB_SHA"]}\n\nBuild: {build}\n\nIPA SHA256: {digest}\n\n'

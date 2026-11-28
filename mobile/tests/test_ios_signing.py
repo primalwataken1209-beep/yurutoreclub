@@ -2,9 +2,11 @@ import copy
 import datetime as dt
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('signing', Path(__file__).parents[1] / 'scripts/ios_signing_check.py')
 signing = importlib.util.module_from_spec(spec)
@@ -70,6 +72,38 @@ class ProfileTests(unittest.TestCase):
                 (p / 'app.bundle.js').write_text(body)
                 with self.subTest(body=body), self.assertRaises(ValueError):
                     signing.check_assets(p, key)
+
+    def test_login_mode_must_match_the_request(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            key = 'sb_publishable_testkey123456'
+            (p / 'app.bundle.js').write_text(key)
+            base = dict(target='staging', appId=signing.APP, supabaseUrl=signing.STAGING)
+            cb = '"redirectUrl":"club.yurutore.app://auth/callback"'
+            def assets(email_only_build, providers):
+                (p / 'build-info.json').write_text(json.dumps(dict(base, **({'iosEmailOnly': True} if email_only_build else {}))))
+                extra = ',"iosEmailOnly":true' if email_only_build else ''
+                (p / 'native-config.js').write_text('{' + cb + ',"oauthProviders":' + providers + extra + '}')
+            assets(True, '[]')
+            signing.check_assets(p, key, True)
+            with self.assertRaises(ValueError):
+                signing.check_assets(p, key, False)       # email-only assets, normal request
+            assets(False, '["google"]')
+            signing.check_assets(p, key, False)
+            with self.assertRaises(ValueError):
+                signing.check_assets(p, key, True)        # normal assets, email-only request
+            assets(True, '["google"]')
+            with self.assertRaises(ValueError):
+                signing.check_assets(p, key, True)        # marked email-only but OAuth still listed
+        for value, expected in [('true', True), ('false', False)]:
+            with mock.patch.dict(os.environ, {'YT_IOS_EMAIL_ONLY': value}):
+                self.assertEqual(signing.email_only_requested(), expected)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('YT_IOS_EMAIL_ONLY', None)
+            self.assertFalse(signing.email_only_requested())
+        for bad in ['', 'TRUE', 'yes', '1']:
+            with self.subTest(bad=bad), mock.patch.dict(os.environ, {'YT_IOS_EMAIL_ONLY': bad}), self.assertRaises(ValueError):
+                signing.email_only_requested()
 
 
 if __name__ == '__main__':

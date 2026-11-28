@@ -9,17 +9,17 @@ const mobile=path.resolve(__dirname,'..'),root=path.resolve(mobile,'..');
 const KEY='sb_publishable_TESTONLY_not_a_real_key';
 const settle=(ms=150)=>new Promise(r=>setTimeout(r,ms));
 const builds={};
-function staging({apple=false}={}){
-  const id=apple?'apple':'plain';
+function staging({apple=false,iosEmailOnly=false}={}){
+  const id=iosEmailOnly?'email':apple?'apple':'plain';
   if(builds[id])return builds[id];
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'yt-app-'));
   process.on('exit',()=>fs.rmSync(dir,{recursive:true,force:true}));
   builds[id]=path.join(dir,'www');
-  build({root,mobile,out:builds[id],target:'staging',apple,env:{YT_STAGING_PUBLISHABLE_KEY:KEY}});
+  build({root,mobile,out:builds[id],target:'staging',apple,iosEmailOnly,env:{YT_STAGING_PUBLISHABLE_KEY:KEY}});
   return builds[id];
 }
-async function launch(t,{fsys=fakeFilesystem(),platform='android',apple=false,lang='ja',fetch,config}={}){
-  const out=staging({apple}),remote=[],errors=[],log={open:[],close:0,minimized:0,listeners:{}};
+async function launch(t,{fsys=fakeFilesystem(),platform='android',apple=false,iosEmailOnly=false,lang='ja',fetch,config}={}){
+  const out=staging({apple,iosEmailOnly}),remote=[],errors=[],log={open:[],close:0,minimized:0,listeners:{}};
   class Bundle extends ResourceLoader{fetch(url){
     const u=new URL(url);if(u.origin!=='https://localhost'){remote.push(url);return null;}
     if(u.pathname==='/vendor/capacitor.js')return Promise.resolve(Buffer.from(CORE_STUB));

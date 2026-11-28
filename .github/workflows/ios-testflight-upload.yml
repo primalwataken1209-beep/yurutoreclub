@@ -24,6 +24,11 @@ on:
         description: 'Unused positive iOS build number; check App Store Connect first'
         required: true
         type: string
+      ios_email_only:
+        description: 'Email sign-in only (no Google/Apple) for this iOS build'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -69,9 +74,14 @@ jobs:
       - name: Build actual staging assets
         env:
           YT_STAGING_PUBLISHABLE_KEY: ${{ inputs.staging_publishable_key }}
+          YT_IOS_EMAIL_ONLY: ${{ inputs.ios_email_only }}
         run: |
           node scripts/check-staging-key.cjs
-          node scripts/build-mobile.cjs --target=staging
+          if [[ "$YT_IOS_EMAIL_ONLY" == "true" ]]; then
+            node scripts/build-mobile.cjs --target=staging --ios-email-only
+          else
+            node scripts/build-mobile.cjs --target=staging
+          fi
           npx --no-install cap sync ios
       - name: Resolve Swift dependencies before loading credentials
         run: |
@@ -90,6 +100,7 @@ jobs:
           YT_DISTRIBUTION_REVIEWED: ${{ inputs.distribution_reviewed }}
           YT_REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           IOS_BUILD_NUMBER: ${{ inputs.build_number }}
+          YT_IOS_EMAIL_ONLY: ${{ inputs.ios_email_only }}
         run: python3 scripts/ios_testflight_upload.py --upload
       # No upload-artifact: an IPA contains the embedded provisioning profile.
       # No tester invitation, beta review submission, group assignment or store release.

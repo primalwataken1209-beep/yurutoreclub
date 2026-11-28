@@ -51,10 +51,14 @@ function options(argv,env){
   const arg=k=>{const a=argv.find(x=>x.startsWith('--'+k+'='));return a?a.slice(k.length+3):undefined;};
   const target=arg('target')||'staging';
   if(!TARGETS[target])throw Error('Unknown target: '+target);
-  return {target,approval:arg('release-approval'),apple:argv.includes('--enable-apple-signin'),env};
+  return {target,approval:arg('release-approval'),apple:argv.includes('--enable-apple-signin'),iosEmailOnly:argv.includes('--ios-email-only'),env};
 }
 
-function build({root,mobile,out,target,approval,apple=false,env,config}){
+// iosEmailOnly (explicit, for the iOS build only): no Google/Apple sign-in at all. The OAuth block is not rendered and the
+// start path refuses every provider (oauthProviders is empty), so the two can never disagree. Email sign-up, sign-in,
+// password reset and the email link return through the callback stay as they are. Android, Web and the default build are unchanged.
+function build({root,mobile,out,target,approval,apple=false,iosEmailOnly=false,env,config}){
+  if(iosEmailOnly&&apple)throw Error('--ios-email-only and --enable-apple-signin cannot be combined');
   const t=TARGETS[target],other=Object.values(TARGETS).find(x=>x!==t);
   config=config||JSON.parse(fs.readFileSync(path.join(mobile,'capacitor.config.json'),'utf8'));
   const scheme=String(config.appId||'');
@@ -102,6 +106,11 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
     "            if(!age13){setLocalError(t('legal.age13Need'));return;}\n"+
     "            onGoogleLogin('apple');\n"+
     "          }}>{window.YT_NATIVE.text('apple')}</button>}",'apple button',2);
+  if(iosEmailOnly){
+    // Both auth screens render the OAuth block only when onGoogleLogin is given; the handler itself also stops.
+    source=once(source,'onGoogleLogin={handleGoogleLogin}','onGoogleLogin={window.YT_NATIVE.oauthEnabled?handleGoogleLogin:undefined}','email-only screens',2);
+    source=once(source,'const handleGoogleLogin=async(provider)=>{','const handleGoogleLogin=async(provider)=>{\n    if(!window.YT_NATIVE.oauthEnabled)return;','email-only handler');
+  }
   // The record screen waits until the new record is committed to the device file; a failure is not praised.
   source=once(source,"    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n",
     "    setSt(s=>({...s,reports:nrs,...(willPost?{posted:[...(s.posted||[]),nr.id]}:{})}));\n"+
@@ -151,7 +160,8 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
   for(const name of ['native-bridge.js','native-storage.js'])fs.copyFileSync(path.join(mobile,'src',name),path.join(out,name));
   const legal=fs.readFileSync(path.join(root,'legal','legal.js'),'utf8').match(/SUPPORT_EMAIL:\s*'([^']+)'/);
   const nativeConfig={target,supabaseUrl,redirectUrl:scheme+'://auth/callback',
-    oauthProviders:apple?['google','apple']:['google'],allowedMail:legal?[legal[1]]:[],allowedExternalOrigins:[]};
+    oauthProviders:iosEmailOnly?[]:apple?['google','apple']:['google'],allowedMail:legal?[legal[1]]:[],allowedExternalOrigins:[],
+    ...(iosEmailOnly?{iosEmailOnly:true}:{})};
   fs.writeFileSync(path.join(out,'native-config.js'),'window.YT_NATIVE_CONFIG=Object.freeze('+JSON.stringify(nativeConfig)+');\n');
   fs.writeFileSync(path.join(out,'app.bundle.js'),bundle);
   fs.writeFileSync(path.join(out,'index.html'),page);
@@ -164,7 +174,7 @@ function build({root,mobile,out,target,approval,apple=false,env,config}){
     if(/\.html$/i.test(rel)&&/<script\b[^>]*\bsrc="(https?:)?\/\//i.test(text))throw Error('Remote script in '+rel);
     if(/\.html$/i.test(rel)&&/type="text\/babel"/.test(text))throw Error('Runtime JSX left in '+rel);
   }
-  fs.writeFileSync(path.join(out,'build-info.json'),JSON.stringify({target,supabaseUrl,appId:scheme,files:files.length+1},null,2)+'\n');
+  fs.writeFileSync(path.join(out,'build-info.json'),JSON.stringify({target,supabaseUrl,appId:scheme,files:files.length+1,...(iosEmailOnly?{iosEmailOnly:true}:{})},null,2)+'\n');
   return {target,supabaseUrl,appId:scheme,files:files.length+1};
 }
 
