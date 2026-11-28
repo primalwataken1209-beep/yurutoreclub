@@ -28,7 +28,7 @@ const IOS_BLOCK=/<p data-platform="ios">[\s\S]*?<\/p>/g;
 const IOS_PRIV={ja:/data-platform="ios"/.test(block(privacy,'ja')),en:/data-platform="ios"/.test(block(privacy,'en'))};
 const IOS_DEL={ja:/data-platform="ios"/.test(block(deletion,'ja')),en:/data-platform="ios"/.test(block(deletion,'en'))};
 const IOS=IOS_DEL.ja;
-const IOS_REVISED={ja:'2026年11月29日',en:'November 29, 2026'};
+const IOS_REVISED={ja:'2026年11月28日',en:'November 28, 2026'};
 const REVISED=IOS?IOS_REVISED:RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
 const DELETION_REVISED=IOS?IOS_REVISED:RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
 test('iOS test version text is on both pages in both languages or on none, needs the retention text, and stays inside its marked paragraphs',()=>{
