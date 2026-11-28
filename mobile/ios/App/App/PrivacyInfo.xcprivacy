@@ -115,6 +115,21 @@
 			</array>
 		</dict>
 		<dict>
+			<!-- Gameplay content: the saved game-like progress synced while signed in (user_progress: pandaPoints,
+			     completedMissions, missionHistory; app.js DEF). Apple's additional guidance: game saves / gameplay logic ->
+			     declare Gameplay Content. Other User Content is for free-form text, which these values are not. -->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeGameplayContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
 			<!-- Contacts: the follow relationships (social graph) stored in follows. The device address book is never read. -->
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeContacts</string>
