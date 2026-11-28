@@ -132,8 +132,13 @@ test('iOS: only exempt (OS-provided) encryption is declared, and the privacy man
     linked:(/<key>NSPrivacyCollectedDataTypeLinked<\/key>\s*<(true|false)\/>/.exec(d)||[])[1],
     tracking:(/<key>NSPrivacyCollectedDataTypeTracking<\/key>\s*<(true|false)\/>/.exec(d)||[])[1],
     purposes:[...((/<key>NSPrivacyCollectedDataTypePurposes<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(d)||[])[1]||'').matchAll(/<string>([A-Za-z]+)<\/string>/g)].map(m=>m[1])}));
-  const expected={Name:['AppFunctionality'],EmailAddress:['AppFunctionality'],UserID:['AppFunctionality'],PhotosorVideos:['AppFunctionality'],
-    OtherUserContent:['AppFunctionality'],Fitness:['AppFunctionality'],ProductInteraction:['Analytics']};
+  // Same classification as the saved Play declaration (data-declaration-decisions-20261116): nickname, account, photos,
+  // posts/comments/notes/reports/chat text, activity (+suggestions), mood (+suggestions), usage events, follows, prefecture/IP region.
+  // Not collected: device or advertising IDs (devId is the fixed label 'ios'/'android' used only as a local storage key),
+  // customer support (email outside the app), precise location.
+  const expected={Name:['AppFunctionality'],EmailAddress:['AppFunctionality'],UserID:['AppFunctionality','Analytics'],PhotosorVideos:['AppFunctionality'],
+    OtherUserContent:['AppFunctionality'],Fitness:['AppFunctionality','ProductPersonalization'],Health:['AppFunctionality','ProductPersonalization'],
+    ProductInteraction:['Analytics'],Contacts:['AppFunctionality'],CoarseLocation:['AppFunctionality']};
   assert.deepEqual(entries.map(e=>e.type).sort(),Object.keys(expected).map(k=>'NSPrivacyCollectedDataType'+k).sort(),'exactly the reviewed types, once each');
   for(const e of entries){
     assert.equal(e.linked,'true',e.type+' linked');assert.equal(e.tracking,'false',e.type+' never used for tracking');
