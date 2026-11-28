@@ -2,8 +2,10 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
-const app=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','utf8');
-const privacy=fs.readFileSync('privacy/index.html','utf8'),deletion=fs.readFileSync('account-deletion/index.html','utf8');
+// Read with line endings normalized: a Windows checkout (CRLF) must give the same verdicts as LF. Only \r\n -> \n; the checks below are unchanged.
+const readText=f=>fs.readFileSync(f,'utf8').replace(/\r\n/g,'\n');
+const app=readText('app.js'),html=readText('index.html');
+const privacy=readText('privacy/index.html'),deletion=readText('account-deletion/index.html');
 const block=(page,lang)=>{const m=new RegExp(`<section data-lang-block="${lang}">([\\s\\S]*?)</section>`).exec(page);assert.ok(m,lang);return m[1];};
 // The code and the policy text are each in one of two states, checked strictly:
 //   code OLD (web, current main): the owner's own screens load an external (Google) picture URL.
