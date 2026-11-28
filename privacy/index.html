@@ -150,6 +150,10 @@
     Android アプリのテスト版では、アカウントの削除を受け付けた時点で送信の途中だった写真が、削除の後に保存される場合があります。その扱いは
     <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
   </p>
+  <p data-platform="ios">
+    iOS アプリのテスト版（TestFlight で配布するバージョン 1.0 のビルド 2 以降）も、外部の URL の画像を読み込まず、既定のアイコンを表示します。
+    削除の時点で送信の途中だった写真の扱いも、Android アプリのテスト版と同じです（<a href="../account-deletion/">アカウント削除について</a> の 4-2）。
+  </p>
 
   <h2>9. 端末内に保存される情報</h2>
   <p>
@@ -167,6 +171,10 @@
   <p>
     Android アプリ版では、アプリデータを端末内のアプリ専用領域に保存し、端末のバックアップや機種変更時の転送の対象外にしています。ログイン情報は Android の Keystore を使って暗号化して保存し、ログアウトすると消去します。
     アプリを削除すると端末内のアプリデータは消え、復元や引き継ぎは保証されません。アプリを削除しても、サーバー上のアカウントは削除されません（アカウントの削除は第16項の方法で行えます）。
+  </p>
+  <p data-platform="ios">
+    iOS アプリのテスト版（TestFlight で配布するバージョン 1.0 のビルド 2 以降）では、アプリデータを端末内のアプリ専用領域に保存し、ログイン情報は iOS のキーチェーンに、この端末だけで使う設定（iCloud で同期しない）で保存します。
+    ログイン情報はログアウトすると消去し、アプリを入れ直した後の最初の起動でも消去します。アプリを削除しても、サーバー上のアカウントは削除されません。
   </p>
 
   <h2>10. Supabase等の外部サービス利用</h2>
@@ -228,6 +236,9 @@
     Android アプリのテスト版では、退会後も再保存の防止と削除処理の確認に必要な記録を保持します。対象と現在の扱いは、
     <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
   </p>
+  <p data-platform="ios">
+    iOS アプリのテスト版（TestFlight で配布するバージョン 1.0 のビルド 2 以降）にも、同じ扱い（<a href="../account-deletion/">アカウント削除について</a> の 4-2）が当てはまります。
+  </p>
 
   <h2>16. アカウント削除・データ削除</h2>
   <p>
@@ -241,6 +252,9 @@
   <p>
     Android アプリのテスト版で、削除の後も保持する記録と、削除の時点で送信の途中だった画像の扱いは、
     <a href="../account-deletion/">アカウント削除について</a> の「4-2. Android アプリのテスト版で削除の後も保持する記録」をご確認ください。
+  </p>
+  <p data-platform="ios">
+    iOS アプリのテスト版（TestFlight で配布するバージョン 1.0 のビルド 2 以降）でも、アプリ内の「プロフィール → アカウントを削除」から削除でき、扱いは同じ 4-2 のとおりです。
   </p>
 
   <h2>17. 子どもの利用</h2>
@@ -268,7 +282,7 @@
 
   <h2>20. 制定日・改定日</h2>
   <p>制定日：2026年9月8日</p>
-  <p>最終改定日：2026年11月24日</p>
+  <p>最終改定日：2026年11月28日</p>
 </section>
 
 <!-- ═══════════════════ English ═══════════════════ -->
@@ -397,6 +411,10 @@
     In the Android test version, a photo that was still being uploaded when we accepted an account deletion may be stored after the deletion.
     See section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for how it is handled.
   </p>
+  <p data-platform="ios">
+    The iOS test version (version 1.0 build 2 and later, distributed through TestFlight) also does not load images from outside URLs and shows the default icon instead.
+    A photo still being uploaded at the time of deletion is handled the same way as in the Android test version (section 4-2 of <a href="../account-deletion/">Account deletion</a>).
+  </p>
 
   <h2>9. Information stored on your device</h2>
   <p>The Service stores the following in your browser's localStorage and sessionStorage:</p>
@@ -412,6 +430,10 @@
   <p>
     In the Android app, app data is kept in the app's private storage on your device and is excluded from device backups and device-to-device transfer. Your sign-in information is stored encrypted using the Android Keystore, and is removed when you sign out.
     Deleting the app removes its app data from your device, and restoring or transferring it is not guaranteed. Deleting the app does not delete your account on our servers (see section 16 to delete your account).
+  </p>
+  <p data-platform="ios">
+    In the iOS test version (version 1.0 build 2 and later, distributed through TestFlight), app data is kept in the app's private storage on your device, and your sign-in information is stored in the iOS Keychain for this device only (not synced through iCloud).
+    Your sign-in information is cleared when you sign out, and also on the first start after the app is reinstalled. Deleting the app does not delete your account on our servers.
   </p>
 
   <h2>10. Supabase and other third-party services</h2>
@@ -469,6 +491,9 @@
     In the Android test version, we retain records needed to prevent further writes and verify deletion processing after account deletion.
     See section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for the records covered and how they are currently handled.
   </p>
+  <p data-platform="ios">
+    The same applies to the iOS test version (version 1.0 build 2 and later, distributed through TestFlight; section 4-2 of <a href="../account-deletion/">Account deletion</a>).
+  </p>
 
   <h2>16. Deleting your account and your data</h2>
   <p>
@@ -482,6 +507,9 @@
   <p>
     For the Android test version, see section 4-2 of <a href="../account-deletion/">Account deletion</a> (the Android test version section) for the records kept after deletion
     and how images that were still being uploaded at the time of deletion are handled.
+  </p>
+  <p data-platform="ios">
+    In the iOS test version (version 1.0 build 2 and later, distributed through TestFlight) you can also delete your account from <strong>Profile → Delete account</strong>, and section 4-2 applies in the same way.
   </p>
 
   <h2>17. Children</h2>
@@ -507,7 +535,7 @@
 
   <h2>20. Dates</h2>
   <p>Effective date: September 8, 2026</p>
-  <p>Last updated: November 24, 2026</p>
+  <p>Last updated: November 28, 2026</p>
 </section>
 
 <footer class="lg-footer">
