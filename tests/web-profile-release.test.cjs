@@ -2,8 +2,10 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
-const app=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','utf8');
-const privacy=fs.readFileSync('privacy/index.html','utf8'),deletion=fs.readFileSync('account-deletion/index.html','utf8');
+// Read with line endings normalized: a Windows checkout (CRLF) must give the same verdicts as LF. Only \r\n -> \n; the checks below are unchanged.
+const readText=f=>fs.readFileSync(f,'utf8').replace(/\r\n/g,'\n');
+const app=readText('app.js'),html=readText('index.html');
+const privacy=readText('privacy/index.html'),deletion=readText('account-deletion/index.html');
 const block=(page,lang)=>{const m=new RegExp(`<section data-lang-block="${lang}">([\\s\\S]*?)</section>`).exec(page);assert.ok(m,lang);return m[1];};
 // The code and the policy text are each in one of two states, checked strictly:
 //   code OLD (web, current main): the owner's own screens load an external (Google) picture URL.
@@ -20,8 +22,29 @@ const VERSIONED=/Android アプリのバージョン 1\.0\.7 以降|Android app 
 const RET_PRIV={ja:/「4-2\. Android アプリのテスト版で削除の後も保持する記録」/.test(block(privacy,'ja')),en:/section 4-2 of <a href="\.\.\/account-deletion\/">/.test(block(privacy,'en'))};
 const RET_DEL={ja:/<h2>4-2\. Android アプリのテスト版で削除の後も保持する記録<\/h2>/.test(block(deletion,'ja')),en:/<h2>4-2\. Records kept after deletion in the Android test version<\/h2>/.test(block(deletion,'en'))};
 const RETAINED=RET_DEL.ja;
-const REVISED=RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
-const DELETION_REVISED=RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+// iOS test version text: only inside elements marked data-platform="ios", on both pages and in both languages, or nowhere.
+// Its revision date is set on the publish day (IOS_REVISED; change it together with the pages).
+const IOS_BLOCK=/<p data-platform="ios">[\s\S]*?<\/p>/g;
+const IOS_PRIV={ja:/data-platform="ios"/.test(block(privacy,'ja')),en:/data-platform="ios"/.test(block(privacy,'en'))};
+const IOS_DEL={ja:/data-platform="ios"/.test(block(deletion,'ja')),en:/data-platform="ios"/.test(block(deletion,'en'))};
+const IOS=IOS_DEL.ja;
+const IOS_REVISED={ja:'2026年11月28日',en:'November 28, 2026'};
+const REVISED=IOS?IOS_REVISED:RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:VERSIONED?{ja:'2026年11月16日',en:'November 16, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+const DELETION_REVISED=IOS?IOS_REVISED:RETAINED?{ja:'2026年11月24日',en:'November 24, 2026'}:{ja:'2026年11月5日',en:'November 5, 2026'};
+test('iOS test version text is on both pages in both languages or on none, needs the retention text, and stays inside its marked paragraphs',()=>{
+  for(const v of [IOS_PRIV.ja,IOS_PRIV.en,IOS_DEL.en])assert.equal(v,IOS,'iOS text state is the same on both pages and in both languages');
+  assert.ok(RETAINED||!IOS,'iOS text needs the retention text (4-2)');
+  for(const page of [privacy,deletion])
+    assert.equal(/iOS|iPhone|TestFlight|キーチェーン|Keychain/.test(page.replace(IOS_BLOCK,'')),false,'iOS wording only inside data-platform="ios" paragraphs');
+  if(!IOS)return;
+  const pj=(block(privacy,'ja').match(IOS_BLOCK)||[]).join(' '),pe=(block(privacy,'en').match(IOS_BLOCK)||[]).join(' ');
+  const dj=(block(deletion,'ja').match(IOS_BLOCK)||[]).join(' '),de=(block(deletion,'en').match(IOS_BLOCK)||[]).join(' ');
+  // Matches the iOS build: Keychain on this device only (no iCloud sync), cleared on sign-out; no outside images; 4-2 applies.
+  assert.match(pj,/キーチェーン/);assert.match(pj,/iCloud で同期しない/);assert.match(pj,/ログアウトすると消去/);assert.match(pj,/外部の URL の画像を読み込まず/);
+  assert.match(pe,/Keychain/);assert.match(pe,/not synced through iCloud/);assert.match(pe,/cleared when you sign out/);assert.match(pe,/does not load images from outside URLs/);
+  for(const t of [pj,dj])assert.match(t,/バージョン 1\.0 のビルド 2 以降/);for(const t of [pe,de])assert.match(t,/version 1\.0 build 2 and later/);
+  assert.match(dj,/iOS アプリのテスト版/);assert.match(de,/iOS test version/);
+});
 test('privacy text state fits the code: new code needs the version-specific policy',()=>{assert.ok(VERSIONED||!NEW,'NEW code with LEGACY policy text');});
 test('retention text is on both pages in both languages, or on none (and needs the versioned policy)',()=>{
   for(const v of [RET_PRIV.ja,RET_PRIV.en,RET_DEL.en])assert.equal(v,RETAINED,'retention text state is the same on both pages and in both languages');
@@ -49,7 +72,7 @@ test('privacy: Japanese and English carry the same revision date, describe the A
   assert.ok(jd&&ed);assert.deepEqual([+jd[1],+jd[2],+jd[3]],[+ed[3],months.indexOf(ed[1])+1,+ed[2]],'Japanese and English revision dates are the same day');
   assert.match(ja,/制定日：2026年9月8日/);assert.match(en,/Effective date: September 8, 2026/);
   assert.match(ja,/Android アプリ版では/);assert.match(en,/In the Android app/);
-  assert.equal(/iOS|キーチェーン|Keychain/.test(privacy),false);
+  assert.equal(/iOS|キーチェーン|Keychain/.test(privacy.replace(IOS_BLOCK,'')),false);
   assert.match(ja,/メールアドレスや Google のプロフィール画像を、ニックネームやプロフィール画像の初期値に使うことはありません/);
   assert.match(en,/Your email address and Google profile picture are never used as your initial nickname or profile photo/);
   assert.match(ja,/ニックネームの初期値として保存され、他の利用者に表示されます/);assert.match(en,/is saved as the initial nickname on our servers and is shown/);
